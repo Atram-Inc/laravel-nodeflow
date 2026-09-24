@@ -74,6 +74,37 @@ describe('filterNodeDefinitions', () => {
 })
 
 describe('NodeLibrary', () => {
+    it('moves unavailable triggers below all usable categories and keeps them searchable', async () => {
+        const user = userEvent.setup()
+        render(
+            <NodeLibrary
+                palette={[entry(), entry({ type: 'app.wait', label: 'Wait', group: 'Zebra' })]}
+                triggers={[
+                    trigger({ type: 'webhook', label: 'Webhook', driver: 'webhook', compatible_source_keys: [] }),
+                    trigger(),
+                ]}
+                onAdd={vi.fn()}
+                onAddTrigger={vi.fn()}
+            />,
+        )
+
+        expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
+            'Triggers', 'Messaging', 'Zebra', 'Unavailable',
+        ])
+        const unavailable = screen.getByRole('region', { name: 'Unavailable' })
+        expect(within(unavailable).getByRole('button', { name: 'Add Webhook' })).toBeDisabled()
+        expect(within(unavailable).getByRole('button', { name: 'Add Webhook' })).toHaveAttribute('draggable', 'false')
+        expect(within(screen.getByRole('region', { name: 'Triggers' })).queryByRole('button', { name: 'Add Webhook' })).toBeNull()
+
+        await user.type(screen.getByRole('searchbox'), 'webhook')
+        expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual(['Unavailable'])
+        expect(screen.getByText('1 node type found')).toBeInTheDocument()
+
+        await user.clear(screen.getByRole('searchbox'))
+        await user.type(screen.getByRole('searchbox'), 'send')
+        expect(screen.queryByRole('region', { name: 'Unavailable' })).toBeNull()
+    })
+
     it('shows server-authored custom triggers before executable groups', () => {
         render(<NodeLibrary palette={[entry()]} triggers={[trigger()]} onAdd={vi.fn()} onAddTrigger={vi.fn()} />)
 
@@ -143,6 +174,8 @@ describe('NodeLibrary', () => {
 
         expect(screen.getByRole('button', { name: 'Add Custom trigger' })).toBeDisabled()
         expect(screen.getByText(/no compatible trigger source is registered/i)).toBeInTheDocument()
+        expect(screen.getByRole('region', { name: 'Unavailable' })).toBeInTheDocument()
+        expect(screen.queryByRole('region', { name: 'Triggers' })).toBeNull()
     })
 
     it('reports the filtered result count through a polite live status', async () => {

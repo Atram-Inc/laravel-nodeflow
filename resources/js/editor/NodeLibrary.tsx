@@ -140,11 +140,13 @@ export function NodeLibrary({
         return terms.every((term) => haystack.includes(term))
     }
     const triggerDefinitions = triggers.filter(matches)
+    const availableTriggers = triggerDefinitions.filter((definition) => hasCompatibleSource(definition, triggerSources))
+    const unavailableTriggers = triggerDefinitions.filter((definition) => !hasCompatibleSource(definition, triggerSources))
     const definitions = filterNodeDefinitions(palette, query)
     const groups = new Map<string, { label: string; definitions: GraphComponentPayload[] }>()
 
-    if (triggerDefinitions.length > 0) {
-        groups.set('triggers', { label: 'Triggers', definitions: triggerDefinitions })
+    if (availableTriggers.length > 0) {
+        groups.set('triggers', { label: 'Triggers', definitions: availableTriggers })
     }
 
     for (const definition of definitions) {
@@ -156,6 +158,10 @@ export function NodeLibrary({
         } else {
             group.definitions.push(definition)
         }
+    }
+
+    if (unavailableTriggers.length > 0) {
+        groups.set('unavailable', { label: 'Unavailable', definitions: unavailableTriggers })
     }
 
     const resultCount = definitions.length + triggerDefinitions.length
