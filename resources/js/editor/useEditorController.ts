@@ -38,6 +38,9 @@ import type { EditorToolbarProps, PublishIndicator, ValidationIndicator } from '
 import type { FlowOverviewIssue, FlowOverviewProps } from './FlowOverview'
 import type { NodeInspectorProps } from './NodeInspector'
 
+/** Mirrors EditorShell's drawer breakpoint. */
+const NARROW_QUERY = '(max-width: 1023px)'
+
 export type EditorDocument = { nodes: NodeflowNode[]; edges: NodeflowEdge[]; startId: string }
 export type EditorSelection = { nodeId: string | null; edgeId: string | null }
 export type EditorView = { libraryOpen: boolean; inspectorOpen: boolean; selectedEdgeId: string | null }
@@ -351,7 +354,12 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     const historyRef = useRef(history)
     historyRef.current = history
     const [selected, setSelected] = useState<EditorSelection>({ nodeId: null, edgeId: null })
-    const [view, setView] = useState<EditorView>({ libraryOpen: true, inspectorOpen: true, selectedEdgeId: null })
+    // Panels start open on a desktop shell; below the drawer breakpoint they
+    // would cover the canvas on load, so a narrow session starts on the canvas.
+    const [view, setView] = useState<EditorView>(() => {
+        const narrow = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_QUERY).matches
+        return { libraryOpen: !narrow, inspectorOpen: !narrow, selectedEdgeId: null }
+    })
     const [validation, setValidation] = useState<ValidationOutcome | null>(null)
     const [publishOutcome, setPublishOutcome] = useState<PublishOutcome | null>(null)
     const [validationState, setValidationState] = useState<ValidationIndicator>({ status: 'unchecked' })
