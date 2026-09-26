@@ -25,6 +25,14 @@ import { NodeLibrary } from './NodeLibrary'
 import { useEditorController, type ToolbarSlots } from './useEditorController'
 
 type ShortcutEntry = { token: symbol; root: HTMLElement }
+
+/**
+ * The shortcut root is display: contents so it never affects host layout, and
+ * browsers cannot focus such an element. Focus goes to the shell box instead.
+ */
+function focusEditor(root: HTMLElement): void {
+    ;(root.querySelector<HTMLElement>('[data-nodeflow-editor-root]') ?? root).focus({ preventScroll: true })
+}
 type ShortcutRegistry = { active: symbol | null; entries: ShortcutEntry[] }
 const shortcutRegistries = new WeakMap<Document, ShortcutRegistry>()
 const useShortcutLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
@@ -53,7 +61,7 @@ function removeShortcut(document: Document, token: symbol, root: HTMLElement): v
     if (wasActive) {
         const fallback = registry.entries.at(-1)
         registry.active = fallback?.token ?? null
-        if (hadFocus) fallback?.root.focus({ preventScroll: true })
+        if (hadFocus && fallback !== undefined) focusEditor(fallback.root)
     }
     if (registry.entries.length === 0) shortcutRegistries.delete(document)
 }
@@ -109,7 +117,7 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
         if (root === null) return
         claimShortcut(root.ownerDocument, shortcutToken.current)
         if ((event?.type === 'pointerdown' || event?.type === 'click') && !interactiveTarget(event.target) && !editableTarget(event.target)) {
-            root.focus({ preventScroll: true })
+            focusEditor(root)
         }
     }
 
@@ -165,6 +173,8 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
                 // removed a node the author was only configuring.
                 event.preventDefault()
                 controller.actions.deleteSelection()
+                // The deleted node or edge may have held focus; keep shortcuts alive.
+                focusEditor(root)
             }
         }
         const document = rootRef.current?.ownerDocument ?? globalThis.document

@@ -202,7 +202,7 @@ export function EditorShell({ mode, toolbar, library, canvas, inspector, notices
     const libraryToggleLabel = isNarrow || !libraryOpen ? 'Open Node Library' : 'Collapse Node Library'
     const inspectorToggleLabel = isNarrow || !inspectorOpen ? 'Open Inspector' : 'Collapse Inspector'
 
-    return <section data-testid="editor-shell" data-nodeflow-editor-root className={`${modeClass} flex flex-col ${className ?? ''}`.trim()} style={shellStyle(libraryWidth, inspectorWidth, isNarrow || libraryOpen, isNarrow || inspectorOpen)}>
+    return <section data-testid="editor-shell" data-nodeflow-editor-root tabIndex={-1} className={`${modeClass} flex flex-col outline-none ${className ?? ''}`.trim()} style={shellStyle(libraryWidth, inspectorWidth, isNarrow || libraryOpen, isNarrow || inspectorOpen)}>
         {toolbar}
         {notices && <div className="shrink-0">{notices}</div>}
         <div data-nodeflow-shell-body className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-[var(--nodeflow-library-track)_var(--nodeflow-library-handle)_minmax(0,1fr)_var(--nodeflow-inspector-handle)_var(--nodeflow-inspector-track)]">

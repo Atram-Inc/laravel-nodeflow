@@ -324,6 +324,27 @@ describe('FlowEditor', () => {
         expect(screen.getByRole('button', { name: 'Open Inspector' })).toBeInTheDocument()
     })
 
+    // The shortcut root is display: contents, which browsers cannot focus. Focus
+    // must land on the shell box, or every shortcut dies after a pane click or
+    // after the focused edge or node is deleted.
+    it('keeps keyboard shortcuts reachable after a pane click and after deleting the focused element', () => {
+        renderEditor()
+        const shell = screen.getByTestId('editor-shell')
+        const pane = document.querySelector('.react-flow__pane')
+        if (!(pane instanceof HTMLElement)) throw new Error('Could not find the React Flow pane.')
+        fireEvent.pointerDown(pane)
+        expect(shell).toHaveFocus()
+
+        const node = canvasNode('send1')
+        fireEvent.click(node)
+        node.focus()
+        fireEvent.keyDown(node, { key: 'Delete' })
+        expect(document.querySelector('.react-flow__node[data-id="send1"]')).toBeNull()
+        expect(shell).toHaveFocus()
+        fireEvent.keyDown(shell, { key: 'z', ctrlKey: true })
+        expect(document.querySelector('.react-flow__node[data-id="send1"]')).not.toBeNull()
+    })
+
     it('ignores Delete and Backspace pressed on an inspector control', () => {
         renderEditor()
         fireEvent.click(canvasNode('send1'))
@@ -731,12 +752,13 @@ describe('FlowEditor', () => {
             {second && <FlowEditor flow={{ ...flow, id: 82, name: 'Second editor' }} graph={graph} palette={palette} trigger_nodes={triggerNodes} trigger_sources={{ event: [] }} webhook={null} urls={urls} autosaveDebounceMs={5} />}
         </>
         const view = render(<First second />)
-        const roots = view.container.querySelectorAll<HTMLElement>('.contents[tabindex="-1"]')
-        roots[1]!.focus()
-        expect(document.activeElement).toBe(roots[1])
+        // Focus lives on each editor's shell box: the display: contents root cannot hold it in a browser.
+        const shells = view.getAllByTestId('editor-shell')
+        shells[1]!.focus()
+        expect(document.activeElement).toBe(shells[1])
 
         view.rerender(<First second={false} />)
-        expect(document.activeElement).toBe(roots[0])
+        expect(document.activeElement).toBe(shells[0])
     })
 
     // Panel deletion owns graph invariants; counterfactual deleting only the node leaves start and dangling edges.
