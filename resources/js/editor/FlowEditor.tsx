@@ -14,6 +14,7 @@ import type {
     TriggerSourcesPayload,
     WebhookMetadata,
 } from '../graph/types'
+import { NodeflowIcon } from '../presentation/icons'
 import { CanvasHud } from './CanvasHud'
 import { EditorNotices } from './EditorNotices'
 import { EditorShell, type EditorMode } from './EditorShell'
@@ -187,7 +188,7 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
     const canvas = <>
         <Canvas {...controller.canvasProps} showMinimap />
         <CanvasHud {...controller.canvasHudProps} />
-        {controller.document.nodes.length === 0 && <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><button type="button" onClick={openLibraryAndFocus} className="pointer-events-auto rounded-md border border-border bg-background px-4 py-2 shadow-sm">Add a node</button></div>}
+        {controller.document.nodes.length === 0 && <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><button type="button" onClick={openLibraryAndFocus} className="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"><NodeflowIcon name="plus" className="size-4" />Add a node</button></div>}
     </>
     const dataGraph: Graph = {
         start: controller.document.startId,
