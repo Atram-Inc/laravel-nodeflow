@@ -1466,3 +1466,49 @@ describe('save indicator', () => {
         await waitFor(() => expect(result.current.toolbarProps.save).toMatchObject({ status: 'saved', unsaved: false }))
     })
 })
+
+describe('panel defaults across the drawer breakpoint', () => {
+    function media(initiallyNarrow: boolean) {
+        const listeners = new Set<(event: { matches: boolean }) => void>()
+        const query = {
+            matches: initiallyNarrow,
+            media: '(max-width: 1023px)',
+            addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => listeners.add(listener),
+            removeEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => listeners.delete(listener),
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+        }
+        vi.stubGlobal('matchMedia', vi.fn(() => query))
+        return {
+            change(narrow: boolean) {
+                query.matches = narrow
+                act(() => { for (const listener of listeners) listener({ matches: narrow }) })
+            },
+        }
+    }
+
+    // Opening narrow then widening left both desktop panels collapsed.
+    it('restores desktop panels when a narrow session widens', () => {
+        const viewport = media(true)
+        const { result } = controller()
+        expect(result.current.view).toMatchObject({ libraryOpen: false, inspectorOpen: false })
+        viewport.change(false)
+        expect(result.current.view).toMatchObject({ libraryOpen: true, inspectorOpen: true })
+    })
+
+    it('keeps a panel the author toggled', () => {
+        const viewport = media(true)
+        const { result } = controller()
+        act(() => result.current.actions.setLibraryOpen(true))
+        act(() => result.current.actions.setLibraryOpen(false))
+        viewport.change(false)
+        expect(result.current.view).toMatchObject({ libraryOpen: false, inspectorOpen: true })
+    })
+
+    it('leaves desktop panels alone when the viewport narrows', () => {
+        const viewport = media(false)
+        const { result } = controller()
+        viewport.change(true)
+        expect(result.current.view).toMatchObject({ libraryOpen: true, inspectorOpen: true })
+    })
+})

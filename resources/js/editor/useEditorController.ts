@@ -360,6 +360,23 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         const narrow = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_QUERY).matches
         return { libraryOpen: !narrow, inspectorOpen: !narrow, selectedEdgeId: null }
     })
+    // Panels the author has not toggled follow the layout: a session that
+    // started narrow gets its desktop panels back when the viewport widens.
+    const panelsToggled = useRef({ library: false, inspector: false })
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+        const media = window.matchMedia(NARROW_QUERY)
+        const onChange = (event: { matches: boolean }) => {
+            if (event.matches) return
+            setView((current) => ({
+                ...current,
+                libraryOpen: panelsToggled.current.library ? current.libraryOpen : true,
+                inspectorOpen: panelsToggled.current.inspector ? current.inspectorOpen : true,
+            }))
+        }
+        media.addEventListener?.('change', onChange)
+        return () => media.removeEventListener?.('change', onChange)
+    }, [])
     const [validation, setValidation] = useState<ValidationOutcome | null>(null)
     const [publishOutcome, setPublishOutcome] = useState<PublishOutcome | null>(null)
     const [validationState, setValidationState] = useState<ValidationIndicator>({ status: 'unchecked' })
@@ -1062,8 +1079,8 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         addNode, addAtViewportCenter, addTrigger, replaceTrigger, nodesChange, edgesChange, connect, selectNode, selectEdge, configure, configureTriggerSource, closeConfigTransaction,
         deleteNode, deleteSelection, undo: () => moveHistory('undo'), redo: () => moveHistory('redo'), autoLayout,
         validate, publish, resolveConflict, registerCanvas: (next) => { canvas.current = next }, focusIssue,
-        setLibraryOpen: (open) => setView((current) => ({ ...current, libraryOpen: open })),
-        setInspectorOpen: (open) => setView((current) => ({ ...current, inspectorOpen: open })),
+        setLibraryOpen: (open) => { panelsToggled.current.library = true; setView((current) => ({ ...current, libraryOpen: open })) },
+        setInspectorOpen: (open) => { panelsToggled.current.inspector = true; setView((current) => ({ ...current, inspectorOpen: open })) },
     }), [addAtViewportCenter, addNode, addTrigger, autoLayout, closeConfigTransaction, configure, configureTriggerSource, connect, deleteNode, deleteSelection, edgesChange, focusIssue, moveHistory, nodesChange, publish, replaceTrigger, resolveConflict, selectEdge, selectNode, validate])
 
     return {
