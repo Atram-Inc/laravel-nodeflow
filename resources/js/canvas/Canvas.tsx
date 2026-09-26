@@ -3,6 +3,8 @@ import {
     Controls,
     MiniMap,
     ReactFlow,
+    useReactFlow,
+    useStore,
     type Connection,
     type Edge,
     type EdgeTypes,
@@ -117,7 +119,57 @@ export const canvasThemeStyle = {
 const DOT_COLOR = `var(--nodeflow-canvas-dots, ${tint('muted-foreground', 28)})`
 const MINIMAP_NODE_COLOR = `var(--nodeflow-minimap-node, ${tint('muted-foreground', 45)})`
 const CONNECTION_LINE_STYLE = { strokeWidth: 1.5 } satisfies CSSProperties
-const FIT_VIEW_OPTIONS = { padding: FIT_PADDING, minZoom: CANVAS_MIN_ZOOM }
+/** Below this zoom node text is unreadable, so the first view pans instead of shrinking further. */
+export const READABLE_ZOOM = 0.6
+const VIEWPORT_MARGIN = 56
+
+export type ViewportSize = { width: number; height: number }
+export type Bounds = { x: number; y: number; width: number; height: number }
+
+/**
+ * The first view of a flow: the whole graph when it fits at a readable zoom
+ * (never above 1:1), otherwise a readable zoom anchored on the flow's left
+ * edge, where its trigger sits. Explicit Fit still frames everything.
+ */
+export function initialViewport(bounds: Bounds, size: ViewportSize): { x: number; y: number; zoom: number } {
+    const usableWidth = Math.max(1, size.width - VIEWPORT_MARGIN * 2)
+    const usableHeight = Math.max(1, size.height - VIEWPORT_MARGIN * 2)
+    const fitZoom = Math.min(usableWidth / Math.max(1, bounds.width), usableHeight / Math.max(1, bounds.height), 1)
+    const zoom = Math.max(fitZoom, READABLE_ZOOM)
+    const graphWidth = bounds.width * zoom
+    const graphHeight = bounds.height * zoom
+    const x = graphWidth <= usableWidth ? (size.width - graphWidth) / 2 - bounds.x * zoom : VIEWPORT_MARGIN - bounds.x * zoom
+    const y = graphHeight <= usableHeight ? (size.height - graphHeight) / 2 - bounds.y * zoom : VIEWPORT_MARGIN - bounds.y * zoom
+    return { x, y, zoom }
+}
+
+/** Applies initialViewport once, after React Flow has measured the nodes and the pane. */
+function InitialViewport() {
+    // React Flow's own nodesInitialized flag only updates when the host feeds
+    // measured nodes back, which read-only canvases never do; the measured
+    // internals are the reliable signal.
+    const initialized = useStore((state) => {
+        if (state.nodeLookup.size === 0) return false
+        for (const node of state.nodeLookup.values()) {
+            if (node.internals.handleBounds === undefined || !node.measured.width || !node.measured.height) return false
+        }
+        return true
+    })
+    const width = useStore((state) => state.width)
+    const height = useStore((state) => state.height)
+    const { getNodes, getNodesBounds, setViewport } = useReactFlow<NodeflowNode, NodeflowEdge>()
+    const applied = useRef(false)
+
+    useEffect(() => {
+        if (applied.current || !initialized || width === 0 || height === 0) return
+        const nodes = getNodes()
+        if (nodes.length === 0) return
+        applied.current = true
+        void setViewport(initialViewport(getNodesBounds(nodes), { width, height }))
+    }, [getNodes, getNodesBounds, height, initialized, setViewport, width])
+
+    return null
+}
 
 export function prefersReducedMotion(): boolean {
     return typeof window !== 'undefined'
@@ -340,11 +392,10 @@ export function Canvas({
                     {...interactions}
                     minZoom={CANVAS_MIN_ZOOM}
                     maxZoom={CANVAS_MAX_ZOOM}
-                    fitView
-                    fitViewOptions={FIT_VIEW_OPTIONS}
                     connectionLineStyle={CONNECTION_LINE_STYLE}
                     proOptions={{ hideAttribution: true }}
                 >
+                    <InitialViewport />
                     <Background color={DOT_COLOR} gap={20} size={1.2} />
                     <Controls showInteractive={false} className="overflow-hidden rounded-md border border-border shadow-sm" />
                     {showMinimap && (
@@ -354,7 +405,7 @@ export function Canvas({
                             ariaLabel="Flow minimap"
                             nodeColor={MINIMAP_NODE_COLOR}
                             nodeBorderRadius={6}
-                            className="overflow-hidden rounded-md border border-border shadow-sm"
+                            className="overflow-hidden rounded-md border border-border shadow-sm max-sm:hidden"
                             style={{ width: 176, height: 120 }}
                         />
                     )}

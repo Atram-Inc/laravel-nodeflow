@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useLayoutEffect, useRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { CanvasEdge, CanvasNode, NodeCardData, NodeTypePayload, TriggerNodeTypePayload } from '../graph/types'
-import { Canvas, canvasActions, canvasBehavior, edgeTypes, interactionProps, prefersReducedMotion, type NodeflowEdge, type NodeflowNode } from './Canvas'
+import { Canvas, canvasActions, canvasBehavior, edgeTypes, initialViewport, interactionProps, prefersReducedMotion, READABLE_ZOOM, type NodeflowEdge, type NodeflowNode } from './Canvas'
 import { CanvasContext } from './context'
 import { defaultNodeRenderer, NodeCard, rendererFor } from './NodeCard'
 import { WorkflowEdge } from './WorkflowEdge'
@@ -418,6 +418,25 @@ describe('WorkflowEdge', () => {
         expect(chip).toHaveTextContent('sent')
         expect(chip).toHaveClass('rounded', 'pointer-events-none', 'nodrag', 'nopan')
         expect(chip.getAttribute('style')).toContain('translate(-50%, -100%) translate(')
+    })
+})
+
+describe('initialViewport', () => {
+    const size = { width: 1000, height: 700 }
+
+    it('frames a flow that fits at a readable zoom without magnifying past 1:1', () => {
+        const small = initialViewport({ x: 0, y: 0, width: 256, height: 112 }, size)
+        expect(small.zoom).toBe(1)
+        expect(small.x).toBe((1000 - 256) / 2)
+        expect(small.y).toBe((700 - 112) / 2)
+    })
+
+    // A wide flow used to be shrunk until card text was unreadable or clipped at both ends.
+    it('keeps a wide flow readable and anchored on its left edge where the trigger sits', () => {
+        const wide = initialViewport({ x: 72, y: 80, width: 3000, height: 400 }, size)
+        expect(wide.zoom).toBe(READABLE_ZOOM)
+        expect(wide.x).toBe(56 - 72 * READABLE_ZOOM)
+        expect(wide.y).toBeCloseTo((700 - 400 * READABLE_ZOOM) / 2 - 80 * READABLE_ZOOM)
     })
 })
 
