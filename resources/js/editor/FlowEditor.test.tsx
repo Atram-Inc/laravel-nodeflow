@@ -345,6 +345,17 @@ describe('FlowEditor', () => {
         expect(document.querySelector('.react-flow__node[data-id="send1"]')).not.toBeNull()
     })
 
+    // Taking focus from a pressed summary stopped the overflow menu receiving Escape.
+    it('leaves focus on a pressed disclosure summary', () => {
+        renderEditor()
+        const summary = screen.getByRole('group', { name: 'More workflow actions' }).querySelector('summary')!
+        summary.focus()
+        fireEvent.pointerDown(summary)
+        expect(summary).toHaveFocus()
+        fireEvent.pointerDown(summary.querySelector('svg')!)
+        expect(summary).toHaveFocus()
+    })
+
     it('ignores Delete and Backspace pressed on an inspector control', () => {
         renderEditor()
         fireEvent.click(canvasNode('send1'))

@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { NodeflowIcon } from '../presentation/icons'
 
 export type SaveIndicator = {
@@ -97,6 +97,47 @@ function secondaryActions(props: EditorToolbarProps): SecondaryAction[][] {
     ]
 }
 
+/**
+ * The narrow overflow menu. A bare details element stays open after an action
+ * and on outside clicks, so it closes on both and on Escape.
+ */
+function OverflowMenu({ actions }: { actions: SecondaryAction[] }) {
+    const details = useRef<HTMLDetailsElement>(null)
+
+    useEffect(() => {
+        const element = details.current
+        if (element === null) return
+        const onPointerDown = (event: PointerEvent) => {
+            if (element.open && event.target instanceof Node && !element.contains(event.target)) element.open = false
+        }
+        element.ownerDocument.addEventListener('pointerdown', onPointerDown, true)
+        return () => element.ownerDocument.removeEventListener('pointerdown', onPointerDown, true)
+    }, [])
+
+    function close(returnFocus: boolean) {
+        const element = details.current
+        if (element === null) return
+        element.open = false
+        if (returnFocus) element.querySelector('summary')?.focus()
+    }
+
+    function onKeyDown(event: KeyboardEvent<HTMLDetailsElement>) {
+        if (event.key !== 'Escape' || details.current?.open !== true) return
+        event.preventDefault()
+        event.stopPropagation()
+        close(true)
+    }
+
+    return <details ref={details} className="relative" onKeyDown={onKeyDown}>
+        <summary aria-label="More workflow actions" title="More workflow actions" className={`flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border bg-card text-foreground hover:bg-muted [&::-webkit-details-marker]:hidden ${focusRing}`}>
+            <NodeflowIcon name="more" className="size-4" />
+        </summary>
+        <div className="absolute right-0 top-full z-20 mt-1 flex min-w-44 flex-col gap-0.5 rounded-md border border-border bg-popover p-1 shadow-md">
+            {actions.map((action) => <MenuAction key={action.label} {...action} onClick={() => { close(false); action.onClick() }} />)}
+        </div>
+    </details>
+}
+
 /** Package-owned workflow context and command controls; server/controller state stays outside. */
 export function EditorToolbar(props: EditorToolbarProps) {
     const publishDescriptionId = `nodeflow-publish-description-${useId().replace(/:/g, '')}`
@@ -127,14 +168,7 @@ export function EditorToolbar(props: EditorToolbarProps) {
                 </div>)}
             </div>
             <div className="lg:hidden" aria-label="More workflow actions" role="group">
-                <details className="relative">
-                    <summary aria-label="More workflow actions" title="More workflow actions" className={`flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border bg-card text-foreground hover:bg-muted [&::-webkit-details-marker]:hidden ${focusRing}`}>
-                        <NodeflowIcon name="more" className="size-4" />
-                    </summary>
-                    <div className="absolute right-0 top-full z-20 mt-1 flex min-w-44 flex-col gap-0.5 rounded-md border border-border bg-popover p-1 shadow-md">
-                        {groups.flat().map((action) => <MenuAction key={action.label} {...action} />)}
-                    </div>
-                </details>
+                <OverflowMenu actions={groups.flat()} />
             </div>
         </div>
         <div className="flex items-center gap-2" aria-label="Workflow persistence actions" role="group">

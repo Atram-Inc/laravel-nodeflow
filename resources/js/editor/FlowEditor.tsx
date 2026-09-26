@@ -95,16 +95,18 @@ export function FlowEditor(props: FlowEditorProps) {
     return <FlowEditorSession key={sessionKey(props)} {...props} />
 }
 
+// Element, not HTMLElement: a press on an icon lands on its SVG, which must
+// still count as its button.
 function editableTarget(target: EventTarget | null): boolean {
-    if (!(target instanceof HTMLElement)) return false
+    if (!(target instanceof Element)) return false
     return target.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-nodeflow-shortcuts="off"]')
         || target.closest('[contenteditable]:not([contenteditable="false"]), [data-nodeflow-shortcuts="off"]') !== null
 }
 
 function interactiveTarget(target: EventTarget | null): boolean {
-    if (!(target instanceof HTMLElement)) return false
-    if (target.closest('.react-flow__node, .react-flow__pane') !== null) return false
-    return target.closest('button, a, input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="button"], [tabindex]:not([tabindex="-1"])') !== null
+    if (!(target instanceof Element)) return false
+    if (target.closest('.react-flow__node, .react-flow__edge, .react-flow__pane') !== null) return false
+    return target.closest('button, a, summary, input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="button"], [tabindex]:not([tabindex="-1"])') !== null
 }
 
 function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts, resolveNodeData, ...options }: FlowEditorProps) {
