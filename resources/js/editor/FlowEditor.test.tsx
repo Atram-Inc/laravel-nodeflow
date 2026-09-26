@@ -306,9 +306,9 @@ describe('FlowEditor', () => {
     it('keeps the narrow inspector drawer closed after pane deselection but opens it for node selection', async () => {
         installMediaQuery(true)
         renderEditor()
-        await waitFor(() => expect(screen.getByRole('dialog', { name: 'Inspector' })).toBeInTheDocument())
-
-        fireEvent.keyDown(document, { key: 'Escape' })
+        // A phone-width editor starts on the canvas; a drawer open on load covered it entirely.
+        expect(screen.queryByRole('dialog', { name: 'Inspector' })).toBeNull()
+        expect(screen.queryByRole('dialog', { name: 'Node Library' })).toBeNull()
         expect(screen.getByRole('button', { name: 'Open Inspector' })).toBeInTheDocument()
         fireEvent.click(canvasNode('send1'))
         const dialog = await screen.findByRole('dialog', { name: 'Inspector' })
@@ -322,6 +322,18 @@ describe('FlowEditor', () => {
         fireEvent.click(pane)
         expect(screen.queryByRole('dialog', { name: 'Inspector' })).toBeNull()
         expect(screen.getByRole('button', { name: 'Open Inspector' })).toBeInTheDocument()
+    })
+
+    it('ignores Delete and Backspace pressed on an inspector control', () => {
+        renderEditor()
+        fireEvent.click(canvasNode('send1'))
+        const tab = screen.getByRole('tab', { name: 'Advanced' })
+        tab.focus()
+        fireEvent.keyDown(tab, { key: 'Delete' })
+        fireEvent.keyDown(tab, { key: 'Backspace' })
+        expect(document.querySelector('.react-flow__node[data-id="send1"]')).not.toBeNull()
+        fireEvent.keyDown(canvasNode('send1'), { key: 'Delete' })
+        expect(document.querySelector('.react-flow__node[data-id="send1"]')).toBeNull()
     })
 
     // Trigger metadata is server-authored and read-only; counterfactual showing only the key hides author guidance.
@@ -1104,7 +1116,6 @@ describe('FlowEditor', () => {
         const user = userEvent.setup()
         installMediaQuery(true)
         renderEditor({ graph: triggeredGraph, trigger_nodes: [webhookTrigger, eventTrigger], trigger_sources: authorableSources })
-        await waitFor(() => expect(screen.getByRole('dialog', { name: 'Inspector' })).toBeInTheDocument())
         await user.click(screen.getByRole('button', { name: 'Open Node Library' }))
         const drawer = await screen.findByRole('dialog', { name: 'Node Library' })
         const opener = within(drawer).getByRole('button', { name: 'Add Laravel event' })
@@ -1489,8 +1500,8 @@ describe('FlowEditor', () => {
             trigger_sources: authorableSources,
             webhook: { endpoint_url: 'https://example.test/hooks/token', active: true, secret_rotated_at: null },
         })
-        const drawer = await screen.findByRole('dialog', { name: 'Inspector' })
         fireEvent.click(canvasNode('trigger'))
+        const drawer = await screen.findByRole('dialog', { name: 'Inspector' })
         const opener = await within(drawer).findByRole('button', { name: 'Rotate webhook secret' })
         await user.click(opener)
         const confirm = screen.getByRole('button', { name: 'Confirm rotation' })

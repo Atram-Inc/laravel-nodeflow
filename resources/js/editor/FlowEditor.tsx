@@ -158,7 +158,10 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
             } else if (plain && !event.shiftKey && event.key.toLowerCase() === 'f') {
                 event.preventDefault()
                 controller.toolbarProps.onFit()
-            } else if ((event.key === 'Delete' || event.key === 'Backspace') && (controller.selected !== undefined || controller.view.selectedEdgeId !== null)) {
+            } else if ((event.key === 'Delete' || event.key === 'Backspace') && !interactiveTarget(event.target) && (controller.selected !== undefined || controller.view.selectedEdgeId !== null)) {
+                // A focused button or link (an inspector tab, a library entry)
+                // keeps its own keys: deleting the canvas selection from there
+                // removed a node the author was only configuring.
                 event.preventDefault()
                 controller.actions.deleteSelection()
             }
