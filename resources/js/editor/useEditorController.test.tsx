@@ -1451,3 +1451,18 @@ describe('canvas node identity during a drag', () => {
         expect(after.find((node) => node.id === 'send1')?.selected).toBe(true)
     })
 })
+
+describe('save indicator', () => {
+    it('marks the draft unsaved from the first edit until its save is accepted', async () => {
+        let release!: () => void
+        const gate = new Promise<void>((resolve) => { release = resolve })
+        vi.stubGlobal('fetch', vi.fn(async () => { await gate; return Response.json({ draft_revision: 8 }) }))
+        const { result } = controller({ autosaveDebounceMs: 1 })
+        expect(result.current.toolbarProps.save).toMatchObject({ status: 'idle', unsaved: false })
+        act(() => result.current.actions.nodesChange([{ id: 'send1', type: 'position', position: { x: 40, y: 0 }, dragging: false }]))
+        expect(result.current.toolbarProps.save).toMatchObject({ status: 'idle', unsaved: true })
+        await waitFor(() => expect(result.current.toolbarProps.save.status).toBe('saving'))
+        act(() => release())
+        await waitFor(() => expect(result.current.toolbarProps.save).toMatchObject({ status: 'saved', unsaved: false }))
+    })
+})

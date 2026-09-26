@@ -62,6 +62,12 @@ describe('EditorToolbar', () => {
         expect(props.onDeleteSelected).toHaveBeenCalledOnce()
     })
 
+    // An edit waiting for its debounce is not saved yet; saying so hid unsaved work.
+    it('reports an idle draft with pending edits as unsaved', () => {
+        toolbar({ save: { status: 'idle', unsaved: true } })
+        expect(screen.getByRole('status', { name: 'Save status: Unsaved changes' })).toHaveTextContent('Unsaved changes')
+    })
+
     it.each([
         ['idle', 'Save status: Changes saved'],
         ['saving', 'Save status: Saving changes'],

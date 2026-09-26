@@ -1051,7 +1051,7 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         ? 'Webhook secret rotation is in progress.'
         : triggerPublishDisabledReason
     const message = outcomeMessages(activeOutcome)
-    const save = { status: autosave.status, message: autosave.message ?? undefined } as EditorToolbarProps['save']
+    const save = { status: autosave.status, message: autosave.message ?? undefined, unsaved: autosave.unsaved } as EditorToolbarProps['save']
     const publishIndicator: PublishIndicator = publishOutcome?.kind === 'published'
         ? { status: 'published', version: publishOutcome.version }
         : publishing ? { status: 'publishing' }

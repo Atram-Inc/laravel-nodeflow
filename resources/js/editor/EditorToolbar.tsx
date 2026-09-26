@@ -4,6 +4,8 @@ import { NodeflowIcon } from '../presentation/icons'
 export type SaveIndicator = {
     status: 'idle' | 'saving' | 'saved' | 'error' | 'conflict'
     message?: string
+    /** An edit the server does not hold yet, for example one waiting for the autosave debounce. */
+    unsaved?: boolean
 }
 
 export type ValidationIndicator = {
@@ -40,6 +42,7 @@ export type EditorToolbarProps = {
 }
 
 function saveCopy(save: SaveIndicator): string {
+    if (save.status === 'idle' && save.unsaved === true) return 'Unsaved changes'
     return ({ idle: 'Changes saved', saving: 'Saving changes', saved: 'Saved', error: 'Save failed', conflict: 'Save conflict' })[save.status]
 }
 
