@@ -1397,3 +1397,57 @@ describe('useEditorController', () => {
         expect(fetchMock.mock.calls.filter(([url]) => url === urls.rotate_webhook_secret)).toHaveLength(2)
     })
 })
+
+describe('canvas node identity during a drag', () => {
+    const twoNodes: Graph = {
+        start: 'send1',
+        nodes: [
+            { id: 'send1', type: 'app.send', config: {}, position: { x: 0, y: 0 } },
+            { id: 'exit1', type: 'core.exit', config: {}, position: { x: 400, y: 0 } },
+        ],
+        edges: [{ from: 'send1', to: 'exit1', output: 'sent' }],
+    }
+
+    // React Flow rebuilds a node's internals, hides it (visibility: hidden) and
+    // drops its handle bounds (so its edges vanish) whenever it receives a new
+    // node object without `measured`. Unchanged nodes must therefore keep their
+    // identity, and a moved node must carry its last measured size.
+    it('keeps untouched nodes identical and re-supplies measured size to the moved node', () => {
+        const { result } = controller({ graph: twoNodes })
+        act(() => result.current.actions.nodesChange([
+            { id: 'send1', type: 'dimensions', dimensions: { width: 256, height: 112 } },
+            { id: 'exit1', type: 'dimensions', dimensions: { width: 256, height: 96 } },
+        ]))
+        const before = result.current.canvasProps.nodes
+        const edgeBefore = result.current.canvasProps.edges[0]
+        expect(result.current.toolbarProps.canUndo).toBe(false)
+
+        act(() => result.current.actions.nodesChange([{ id: 'send1', type: 'position', position: { x: 12, y: 8 }, dragging: true }]))
+        const during = result.current.canvasProps.nodes
+        expect(during.find((node) => node.id === 'exit1')).toBe(before.find((node) => node.id === 'exit1'))
+        expect(during.find((node) => node.id === 'send1')).toMatchObject({ position: { x: 12, y: 8 }, measured: { width: 256, height: 112 } })
+
+        act(() => result.current.actions.nodesChange([{ id: 'send1', type: 'position', position: { x: 20, y: 10 }, dragging: false }]))
+        const after = result.current.canvasProps.nodes
+        expect(after.find((node) => node.id === 'exit1')).toBe(before.find((node) => node.id === 'exit1'))
+        expect(after.find((node) => node.id === 'send1')?.measured).toEqual({ width: 256, height: 112 })
+        expect(result.current.canvasProps.edges[0]).toBe(edgeBefore)
+    })
+
+    it('keeps measured size out of history, autosave and validation state', () => {
+        const { result } = controller({ graph: twoNodes })
+        const graphBefore = JSON.stringify(result.current.document)
+        act(() => result.current.actions.nodesChange([{ id: 'send1', type: 'dimensions', dimensions: { width: 256, height: 112 } }]))
+        expect(result.current.toolbarProps.canUndo).toBe(false)
+        expect(JSON.stringify(result.current.document)).toBe(graphBefore)
+    })
+
+    it('keeps node identity across an unrelated selection change', () => {
+        const { result } = controller({ graph: twoNodes })
+        const before = result.current.canvasProps.nodes
+        act(() => result.current.actions.selectNode('send1'))
+        const after = result.current.canvasProps.nodes
+        expect(after.find((node) => node.id === 'exit1')).toBe(before.find((node) => node.id === 'exit1'))
+        expect(after.find((node) => node.id === 'send1')?.selected).toBe(true)
+    })
+})
