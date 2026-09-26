@@ -15,7 +15,7 @@ import {
     type ReactFlowProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react'
 import type { CanvasEdge, CanvasNode, GraphComponentPayload, NodeCardData } from '../graph/types'
 import { CanvasContext, type NodeDecorationMap, type NodeRendererMap } from './context'
 import { CANVAS_ORIGIN, NODE_MIN_HEIGHT, NODE_WIDTH } from './layout'
@@ -67,6 +67,57 @@ const EMPTY_RENDERERS: NodeRendererMap = Object.freeze({})
 const EMPTY_NODE_ERRORS: Record<string, string[]> = Object.freeze({})
 const EMPTY_DECORATIONS: NodeDecorationMap = Object.freeze({})
 const NODE_TYPE_MIME = 'application/x-nodeflow-node-type'
+/** React Flow's default floor (0.5) cannot frame a flow wider than twice the viewport. */
+export const CANVAS_MIN_ZOOM = 0.2
+export const CANVAS_MAX_ZOOM = 2
+const FIT_PADDING = 0.22
+
+/**
+ * A host semantic token as a CSS color. Tailwind 4 themes expose it either as
+ * --color-<name> or, with `@theme inline` (shadcn style), only as --<name>.
+ * The package ships no stylesheet, so these are the only values it assumes.
+ */
+function token(name: string): string {
+    return `var(--color-${name}, var(--${name}))`
+}
+
+function tint(name: string, percent: number): string {
+    return `color-mix(in oklab, ${token(name)} ${percent}%, transparent)`
+}
+
+/**
+ * Maps React Flow's own theming variables onto the host tokens so edges,
+ * controls, minimap and selection follow the host theme in light and dark.
+ * Each value can be overridden through a --nodeflow-* variable.
+ */
+export const canvasThemeStyle = {
+    '--xy-edge-stroke': `var(--nodeflow-edge, ${tint('muted-foreground', 80)})`,
+    '--xy-edge-stroke-selected': `var(--nodeflow-edge-selected, ${token('primary')})`,
+    '--xy-edge-stroke-width': 'var(--nodeflow-edge-width, 1.5)',
+    '--xy-connectionline-stroke': `var(--nodeflow-edge-selected, ${token('primary')})`,
+    '--xy-connectionline-stroke-width': 'var(--nodeflow-edge-width, 1.5)',
+    '--xy-handle-background-color': token('muted-foreground'),
+    '--xy-handle-border-color': token('card'),
+    '--xy-selection-background-color': tint('primary', 8),
+    '--xy-selection-border': `1px dashed ${token('primary')}`,
+    '--xy-controls-button-background-color': token('card'),
+    '--xy-controls-button-background-color-hover': token('muted'),
+    '--xy-controls-button-color': token('foreground'),
+    '--xy-controls-button-color-hover': token('foreground'),
+    '--xy-controls-button-border-color': token('border'),
+    '--xy-controls-box-shadow': 'none',
+    '--xy-minimap-background-color': token('card'),
+    '--xy-minimap-mask-background-color': tint('foreground', 8),
+    '--xy-minimap-mask-stroke-color': token('border'),
+    '--xy-minimap-node-background-color': tint('muted-foreground', 35),
+    '--xy-minimap-node-stroke-color': 'transparent',
+    '--xy-edge-label-background-color': token('card'),
+    '--xy-edge-label-color': token('muted-foreground'),
+} as CSSProperties
+const DOT_COLOR = `var(--nodeflow-canvas-dots, ${tint('muted-foreground', 28)})`
+const MINIMAP_NODE_COLOR = `var(--nodeflow-minimap-node, ${tint('muted-foreground', 45)})`
+const CONNECTION_LINE_STYLE = { strokeWidth: 1.5 } satisfies CSSProperties
+const FIT_VIEW_OPTIONS = { padding: FIT_PADDING, minZoom: CANVAS_MIN_ZOOM }
 
 export function prefersReducedMotion(): boolean {
     return typeof window !== 'undefined'
@@ -82,7 +133,7 @@ export function canvasActions(
     const duration = reducedMotion ? 0 : 220
 
     return {
-        fit: () => void instance.fitView({ padding: 0.22, duration }),
+        fit: () => void instance.fitView({ padding: FIT_PADDING, duration, minZoom: CANVAS_MIN_ZOOM }),
         centerNode: (id) => {
             const node = instance.getNode(id)
 
@@ -271,7 +322,7 @@ export function Canvas({
 
     return (
         <CanvasContext.Provider value={context}>
-            <div ref={wrapperRef} className={className}>
+            <div ref={wrapperRef} className={className} style={canvasThemeStyle}>
                 <ReactFlow<NodeflowNode, NodeflowEdge>
                     nodes={behavior.nodes}
                     edges={behavior.edges}
@@ -287,17 +338,24 @@ export function Canvas({
                     onDragOver={handleDragOver}
                     onDrop={handleDrop}
                     {...interactions}
+                    minZoom={CANVAS_MIN_ZOOM}
+                    maxZoom={CANVAS_MAX_ZOOM}
                     fitView
+                    fitViewOptions={FIT_VIEW_OPTIONS}
+                    connectionLineStyle={CONNECTION_LINE_STYLE}
                     proOptions={{ hideAttribution: true }}
                 >
-                    <Background color="hsl(var(--border))" />
-                    <Controls showInteractive={false} className="border border-border bg-background text-foreground shadow-sm" />
+                    <Background color={DOT_COLOR} gap={20} size={1.2} />
+                    <Controls showInteractive={false} className="overflow-hidden rounded-md border border-border shadow-sm" />
                     {showMinimap && (
                         <MiniMap
                             pannable
                             zoomable
-                            className="border border-border bg-background"
-                            style={{ background: 'hsl(var(--background))' }}
+                            ariaLabel="Flow minimap"
+                            nodeColor={MINIMAP_NODE_COLOR}
+                            nodeBorderRadius={6}
+                            className="overflow-hidden rounded-md border border-border shadow-sm"
+                            style={{ width: 176, height: 120 }}
                         />
                     )}
                 </ReactFlow>

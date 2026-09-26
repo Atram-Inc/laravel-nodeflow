@@ -751,7 +751,7 @@ describe('Canvas', () => {
         actions.centerNode('partial')
         actions.centerNode('missing')
 
-        expect(fitView).toHaveBeenCalledWith({ padding: 0.22, duration: 220 })
+        expect(fitView).toHaveBeenCalledWith({ padding: 0.22, duration: 220, minZoom: 0.2 })
         expect(getNode).toHaveBeenNthCalledWith(1, 'n1')
         expect(getNodesBounds).toHaveBeenCalledWith([{ id: 'n1', position: { x: 40, y: 80 } }])
         expect(setCenter).toHaveBeenCalledWith(168, 136, { zoom: 0.85, duration: 220 })
@@ -786,7 +786,7 @@ describe('Canvas', () => {
         const fitView = vi.fn()
         canvasActions({ fitView } as unknown as ReactFlowInstance<NodeflowNode, NodeflowEdge>, true).fit()
 
-        expect(fitView).toHaveBeenCalledWith({ padding: 0.22, duration: 0 })
+        expect(fitView).toHaveBeenCalledWith({ padding: 0.22, duration: 0, minZoom: 0.2 })
     })
 
     it('detects reduced motion without requiring browser globals during SSR', () => {
@@ -806,10 +806,19 @@ describe('Canvas', () => {
 
         const visible = render(<Canvas nodes={[canvasNode]} edges={[]} defs={{ 'app.send': def() }} showMinimap />)
         expect(visible.container.querySelector('.react-flow__minimap')).not.toBeNull()
-        expect(visible.container.querySelector('.react-flow__minimap')).toHaveClass('border', 'border-border', 'bg-background')
-        expect(visible.container.querySelector('.react-flow__minimap')).toHaveStyle({
-            background: 'hsl(var(--background))',
-        })
+        expect(visible.container.querySelector('.react-flow__minimap')).toHaveClass('border', 'border-border')
+        expect(visible.container.querySelector('.react-flow__minimap')?.getAttribute('style') ?? '').not.toContain('hsl(')
+    })
+
+    // Host tokens are full colors (hex/oklch), so hsl(var(--token)) was invalid
+    // CSS: black canvas dots, a transparent minimap and white controls in dark mode.
+    it('themes React Flow through host tokens without assuming an HSL token format', () => {
+        const { container } = render(<Canvas nodes={[canvasNode]} edges={[]} defs={{ 'app.send': def() }} />)
+        const wrapper = container.firstElementChild as HTMLElement
+        const style = wrapper.getAttribute('style') ?? ''
+        expect(style).toContain('--xy-edge-stroke-selected: var(--nodeflow-edge-selected, var(--color-primary, var(--primary)))')
+        expect(style).toContain('--xy-controls-button-background-color: var(--color-card, var(--card))')
+        expect(container.innerHTML).not.toContain('hsl(var(')
     })
 
     it('registers the workflow edge renderer at module scope', () => {
