@@ -111,7 +111,7 @@ export function EditorToolbar(props: EditorToolbarProps) {
     const saveTone = props.save.status === 'error' || props.save.status === 'conflict' ? 'text-destructive' : 'text-muted-foreground'
     const validationTone = props.validation.status === 'invalid' || props.validation.status === 'failed'
         ? 'bg-destructive/10 text-foreground'
-        : props.validation.status === 'valid' || props.validation.status === 'warning' ? 'bg-muted text-foreground' : 'bg-muted text-muted-foreground'
+        : 'bg-muted text-foreground'
     const groups = secondaryActions(props).filter((group) => group.length > 0)
 
     return <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-3 py-2 text-card-foreground sm:px-4">
