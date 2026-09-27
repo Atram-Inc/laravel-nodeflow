@@ -55,7 +55,7 @@ describe('toCanvas', () => {
 
     expect(canvas.nodes.map((node) => node.data.kind)).toEqual(['trigger', 'executable', null])
     expect(canvas.nodes[0]).toMatchObject({
-      position: { x: 1, y: 2 },
+      position: { x: 72, y: 88 },
       data: { type: 'custom.trigger', config: { source: 'orders' }, isStart: true },
     })
     expect(canvas.edges[0]).toMatchObject({ source: 'trigger1', sourceHandle: 'started', target: 'send1' })
@@ -78,8 +78,8 @@ describe('toCanvas', () => {
     expect(canvasConfig.filters).not.toBe(config.filters)
   })
 
-  it('keeps every valid stored node position exactly', () => {
-    // Counterfactual: regenerating stored positions would move a saved canvas on reload.
+  it('lays every graph out left to right, ignoring stored positions', () => {
+    // Counterfactual: reading stored positions would reopen a messy canvas.
     const graph: Graph = {
       ...baseGraph,
       nodes: [
@@ -87,11 +87,25 @@ describe('toCanvas', () => {
         { id: 'n2', type: 'core.exit', position: { x: 0, y: 900.75 } },
       ],
     }
+    const unpositioned: Graph = { ...graph, nodes: graph.nodes!.map(({ position: _position, ...node }) => node) }
+    const positions = toCanvas(graph).nodes.map((node) => node.position)
 
-    expect(toCanvas(graph).nodes.map((node) => node.position)).toEqual([
-      { x: 40.5, y: -80.25 },
-      { x: 0, y: 900.75 },
-    ])
+    expect(positions).toEqual(toCanvas(unpositioned).nodes.map((node) => node.position))
+    expect(positions[0]!.x).toBeLessThan(positions[1]!.x)
+    expect(positions[0]!.y).toBe(positions[1]!.y)
+  })
+
+  it('gives an edge that jumps a column its lanes, and no other edge any', () => {
+    const graph: Graph = {
+      start: 'a',
+      nodes: [{ id: 'a', type: 'app.send' }, { id: 'b', type: 'app.send' }, { id: 'c', type: 'core.exit' }],
+      edges: [{ from: 'a', to: 'b', output: 'sent' }, { from: 'b', to: 'c', output: 'sent' }, { from: 'a', to: 'c', output: 'sent' }],
+    }
+    const edges = toCanvas(graph).edges
+
+    expect(edges[0]!.data).toBeUndefined()
+    expect(edges[1]!.data).toBeUndefined()
+    expect(edges[2]!.data?.lanes).toHaveLength(1)
   })
 
   it('marks only the graph start node as the start', () => {

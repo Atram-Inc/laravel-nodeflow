@@ -300,6 +300,7 @@ it('denies when the update gate refuses', function () {
     // has defined no gates" is the one that exercises that, and beforeEach() in
     // this file defines the gate for every other test.
     Gate::define('nodeflow.update', fn ($user, $flow = null) => false);
+    Gate::define('nodeflow.viewAny', fn ($user, $flow = null) => false);
 
     $this->actingAs($this->user)
         ->getJson("/nodeflow/flows/{$this->flow->id}/nodes/test.dynamic_options/fields/template/options")
@@ -320,4 +321,13 @@ it('four-oh-fours trigger options for another tenants flow', function () {
     $this->actingAs($this->user)
         ->getJson("/nodeflow/flows/{$foreign->id}/trigger-nodes/test.field-options-trigger/fields/account/options")
         ->assertNotFound();
+});
+
+it('serves options to someone who may view the flow but not edit it (the read-only editor)', function () {
+    Gate::define('nodeflow.update', fn ($user, $flow = null) => false);
+    Gate::define('nodeflow.viewAny', fn ($user, $flow = null) => true);
+
+    $this->actingAs($this->user)
+        ->getJson("/nodeflow/flows/{$this->flow->id}/nodes/test.dynamic_options/fields/template/options")
+        ->assertOk();
 });

@@ -3,6 +3,7 @@ import type { PublishIndicator, SaveIndicator, ValidationIndicator } from './Edi
 
 export type EditorNoticesProps = {
     save: SaveIndicator
+    /** Publish outcomes are answered by the publish toast; kept for API compatibility. */
     publish?: PublishIndicator
     validation?: ValidationIndicator
     structuralError?: string
@@ -17,7 +18,7 @@ function Alert({ children }: { children: ReactNode }) {
 }
 
 /** Pure, persistent presentation of controller-owned notices. It makes no requests or effects. */
-export function EditorNotices({ save, publish, validation, structuralError, graphMessages, validationMessage, onKeepMine, onUseTheirs }: EditorNoticesProps) {
+export function EditorNotices({ save, validation, structuralError, graphMessages, validationMessage, onKeepMine, onUseTheirs }: EditorNoticesProps) {
     const graphFailure = graphMessages?.filter(Boolean) ?? []
     const validationFailed = validation?.status === 'failed'
     return <section aria-label="Workflow notices">
@@ -25,8 +26,6 @@ export function EditorNotices({ save, publish, validation, structuralError, grap
         {save.status === 'error' && <Alert>{save.message ?? 'Could not save changes.'}</Alert>}
         {structuralError && <Alert>{structuralError}</Alert>}
         {graphFailure.length > 0 && <Alert><ul>{graphFailure.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}</ul></Alert>}
-        {publish?.status === 'error' && <Alert>{publish.message ?? 'Could not publish this workflow.'}</Alert>}
         {validationFailed && <Alert>{validationMessage ?? 'Validation could not complete.'}</Alert>}
-        {publish?.status === 'published' && <div role="status" className="border-b border-border bg-muted px-4 py-2 text-sm text-foreground">Published v{publish.version ?? ''}</div>}
     </section>
 }

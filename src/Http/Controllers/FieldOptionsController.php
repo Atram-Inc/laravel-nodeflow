@@ -6,6 +6,7 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\Gate;
 use Nodeflow\Models\Flow;
 use Nodeflow\Nodes\NodeRegistry;
 use Nodeflow\Schema\Field;
@@ -40,7 +41,7 @@ class FieldOptionsController extends Controller
         $flow = $this->boundFlow($request);
         $type = $this->routeString($request, 'type');
         $field = $this->routeString($request, 'field');
-        $this->authorize('update', $flow);
+        $this->authorizeOptions($request, $flow);
 
         $registry = app(NodeRegistry::class);
 
@@ -62,7 +63,7 @@ class FieldOptionsController extends Controller
         $flow = $this->boundFlow($request);
         $type = $this->routeString($request, 'type');
         $field = $this->routeString($request, 'field');
-        $this->authorize('update', $flow);
+        $this->authorizeOptions($request, $flow);
 
         $triggers = app(TriggerNodeRegistry::class);
 
@@ -87,7 +88,7 @@ class FieldOptionsController extends Controller
         $type = $this->routeString($request, 'type');
         $source = $this->routeString($request, 'source');
         $field = $this->routeString($request, 'field');
-        $this->authorize('update', $flow);
+        $this->authorizeOptions($request, $flow);
 
         $triggers = app(TriggerNodeRegistry::class);
 
@@ -177,5 +178,15 @@ class FieldOptionsController extends Controller
         abort_unless(is_string($value), 404);
 
         return $value;
+    }
+
+    /**
+     * Options label the tenant's own records, so an editor needs them and so
+     * does a read-only view of the same flow (it shows the chosen labels in
+     * disabled fields): either ability is enough.
+     */
+    private function authorizeOptions(Request $request, Flow $flow): void
+    {
+        abort_unless(Gate::forUser($request->user())->any(['update', 'view'], $flow), 403);
     }
 }

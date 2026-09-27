@@ -23,10 +23,22 @@ export type { EditorMode, FlowEditorProps, ToolbarSlots } from './editor/FlowEdi
 export type { ConfigPanelProps } from './editor/ConfigPanel'
 export type { NodeLibraryProps } from './editor/NodeLibrary'
 export type { EditorActions, EditorDocument, EditorSelection, EditorView } from './editor/useEditorController'
+export { laidOutDocument } from './editor/useEditorController'
+export { PublicationStatus } from './editor/EditorToolbar'
+export type { PublicationState } from './editor/EditorToolbar'
+export { defaultEditorLabels, relativeTime, resolveEditorLabels } from './editor/labels'
+export type { EditorLabels } from './editor/labels'
+export { PublishToast } from './editor/PublishToast'
+export type { PublishToastProps, PublishToastState } from './editor/PublishToast'
+export { EditorReadOnlyContext, useEditorReadOnly } from './editor/readOnly'
+export { hierarchicalLayout, layoutForGraph, layoutGraph, positionsForGraph } from './graph/layout'
+export type { EdgeLane, LayoutEdge, LayoutNode, LayoutResult } from './graph/layout'
+export { toCanvas } from './graph/toCanvas'
 export type { ValidationOutcome } from './editor/validation'
 
 export type {
     CanvasEdge,
+    CanvasEdgeLane,
     CanvasNode,
     EditorUrls,
     FieldPayload,

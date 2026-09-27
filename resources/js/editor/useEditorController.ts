@@ -8,12 +8,12 @@ import {
 } from '@xyflow/react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CanvasActions, CanvasProps, NodeflowEdge, NodeflowNode } from '../canvas/Canvas'
-import { CANVAS_ORIGIN, NODE_MIN_HEIGHT, NODE_WIDTH, ROW_GAP } from '../canvas/layout'
+import { CANVAS_ORIGIN, estimatedNodeHeight } from '../canvas/layout'
 import type { NodeRendererMap } from '../canvas/context'
 import { mergeControls, type ControlMap } from '../controls'
 import { toCanvas } from '../graph/toCanvas'
 import { cloneGraphConfig, cloneJsonValue } from '../graph/json'
-import { hierarchicalLayout } from '../graph/layout'
+import { layoutForGraph } from '../graph/layout'
 import { defsByType, toGraph } from '../graph/toGraph'
 import type {
     EditorUrls,
@@ -34,7 +34,9 @@ import { useAutosave } from './useAutosave'
 import { interpretValidation, type ValidationOutcome } from './validation'
 import type { CanvasHudProps } from './CanvasHud'
 import type { EditorNoticesProps } from './EditorNotices'
-import type { EditorToolbarProps, PublishIndicator, ValidationIndicator } from './EditorToolbar'
+import type { EditorToolbarProps, PublicationState, PublishIndicator, ValidationIndicator } from './EditorToolbar'
+import { resolveEditorLabels, type EditorLabels } from './labels'
+import type { PublishToastProps, PublishToastState } from './PublishToast'
 import type { FlowOverviewIssue, FlowOverviewProps } from './FlowOverview'
 import type { NodeInspectorProps } from './NodeInspector'
 
@@ -84,6 +86,11 @@ export type UseEditorControllerOptions = {
     controls?: ControlMap
     nodeRenderers?: NodeRendererMap
     autosaveDebounceMs?: number
+    /** Read-only mode: the graph can be inspected but never changed, saved or published. */
+    readOnly?: boolean
+    labels?: Partial<EditorLabels>
+    /** What is being edited, in the host's words, shown under the flow name. */
+    context?: string | null
 }
 
 export type UseEditorControllerResult = {
@@ -98,6 +105,9 @@ export type UseEditorControllerResult = {
     noticeProps: EditorNoticesProps
     flowOverviewProps: FlowOverviewProps
     nodeInspectorProps: NodeInspectorProps | null
+    toastProps: PublishToastProps
+    labels: EditorLabels
+    readOnly: boolean
 }
 
 function copiedConfig(definition: GraphComponentPayload): Record<string, unknown> {
@@ -180,16 +190,49 @@ type Measured = { width: number; height: number }
 type CanvasNodeEntry = { source: NodeflowNode; selected: boolean; isStart: boolean; node: NodeflowNode }
 type CanvasEdgeEntry = { source: NodeflowEdge; selected: boolean; edge: NodeflowEdge }
 
-function overlap(left: { x: number; y: number }, right: { x: number; y: number }): boolean {
-    return Math.abs(left.x - right.x) < NODE_WIDTH && Math.abs(left.y - right.y) < NODE_MIN_HEIGHT
+/** What a graph does, without canvas positions. */
+function semanticKey(graph: Graph): string {
+    return JSON.stringify({
+        start: graph.start ?? '',
+        nodes: (graph.nodes ?? []).map((node) => ({ id: node.id, type: node.type, config: node.config ?? {} })),
+        edges: graph.edges ?? [],
+    })
 }
 
-function availablePoint(point: { x: number; y: number }, nodes: NodeflowNode[]): { x: number; y: number } {
-    let next = point
-    while (nodes.some((node) => overlap(node.position, next))) {
-        next = { x: next.x, y: next.y + NODE_MIN_HEIGHT + ROW_GAP }
-    }
-    return next
+function sameLanes(left: unknown, right: Array<{ x: number; y: number }> | undefined): boolean {
+    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+}
+
+/**
+ * The document after the automatic layout. A node or edge the layout leaves
+ * where it was keeps its object, so React Flow keeps its measured internals
+ * (the same structural sharing snapshotDocument relies on).
+ */
+export function laidOutDocument(
+    document: EditorDocument,
+    defs: Record<string, GraphComponentPayload>,
+    measured?: ReadonlyMap<string, { width: number; height: number }>,
+): EditorDocument {
+    const layout = layoutForGraph({
+        start: document.startId,
+        nodes: document.nodes.map((node) => ({ id: node.id, type: node.data.type })),
+        edges: document.edges.map((edge) => ({ from: edge.source, to: edge.target, output: edge.sourceHandle })),
+    }, defs, (id) => measured?.get(id)?.height)
+    const nodes = document.nodes.map((node) => {
+        const position = layout.positions[node.id]
+        if (position === undefined || (position.x === node.position.x && position.y === node.position.y)) return node
+        return { ...node, position }
+    })
+    const edges = document.edges.map((edge, index) => {
+        const lanes = layout.lanes[index]
+        if (sameLanes(edge.data?.lanes, lanes)) return edge
+        const { lanes: _lanes, ...data } = (edge.data ?? {}) as Record<string, unknown>
+        const rest = { ...edge }
+        delete rest.data
+        const nextData = lanes === undefined ? data : { ...data, lanes }
+        return Object.keys(nextData).length === 0 ? rest : { ...rest, data: nextData }
+    })
+    return { nodes, edges, startId: document.startId }
 }
 
 function wouldCreateCycle(edges: NodeflowEdge[], source: string, target: string): boolean {
@@ -227,6 +270,16 @@ function outcomeMessages(outcome: ValidationOutcome | PublishOutcome | null): { 
     if (outcome?.kind === 'semantic') return { graph: [...outcome.banner, ...outcome.unplaceable] }
     if (outcome?.kind === 'failed') return { graph: [], failed: outcome.message }
     return { graph: [] }
+}
+
+function publishFailureReason(outcome: PublishOutcome, labels: EditorLabels): string {
+    if (outcome.kind === 'failed') return outcome.message
+    if (outcome.kind === 'structural') return 'The editor sent a graph the server could not read. This is a client bug.'
+    if (outcome.kind === 'semantic') {
+        const count = Object.values(outcome.byNode).flat().length + outcome.unplaceable.length
+        return outcome.banner[0] ?? outcome.unplaceable[0] ?? labels.publishInvalid(count)
+    }
+    return ''
 }
 
 type WebhookCredentialIdentity = {
@@ -358,7 +411,7 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     // would cover the canvas on load, so a narrow session starts on the canvas.
     const [view, setView] = useState<EditorView>(() => {
         const narrow = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_QUERY).matches
-        return { libraryOpen: !narrow, inspectorOpen: !narrow, selectedEdgeId: null }
+        return { libraryOpen: !narrow && options.readOnly !== true, inspectorOpen: !narrow, selectedEdgeId: null }
     })
     // Panels the author has not toggled follow the layout: a session that
     // started narrow gets its desktop panels back when the viewport widens.
@@ -370,7 +423,7 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
             if (event.matches) return
             setView((current) => ({
                 ...current,
-                libraryOpen: panelsToggled.current.library ? current.libraryOpen : true,
+                libraryOpen: panelsToggled.current.library || readOnlyRef.current ? current.libraryOpen : true,
                 inspectorOpen: panelsToggled.current.inspector ? current.inspectorOpen : true,
             }))
         }
@@ -381,7 +434,24 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     const [publishOutcome, setPublishOutcome] = useState<PublishOutcome | null>(null)
     const [validationState, setValidationState] = useState<ValidationIndicator>({ status: 'unchecked' })
     const [publishing, setPublishing] = useState(false)
-    const [publishedVersion, setPublishedVersion] = useState<number | null>(options.flow.version)
+    const readOnly = options.readOnly === true
+    const readOnlyRef = useRef(readOnly)
+    readOnlyRef.current = readOnly
+    const labels = useMemo(() => resolveEditorLabels(options.labels), [options.labels])
+    const [publication, setPublication] = useState<PublicationState>({
+        version: options.flow.version,
+        publishedAt: options.flow.published_at ?? null,
+        publishedBy: options.flow.published_by ?? null,
+    })
+    const publishedVersion = publication.version
+    const [toast, setToast] = useState<PublishToastState>(null)
+    const toastSequence = useRef(0)
+    const showToast = useCallback((next: { kind: 'success'; version: number } | { kind: 'error'; reason: string }) => {
+        toastSequence.current += 1
+        setToast({ ...next, key: toastSequence.current })
+    }, [])
+    const dismissToast = useCallback(() => setToast(null), [])
+    const pendingCenter = useRef<string | null>(null)
     const [webhookState, setWebhookState] = useState<WebhookClientState>({ metadata: options.webhook, disclosure: null })
     const webhookMetadata = webhookState.metadata
     const webhookSecret = webhookState.disclosure?.secret ?? null
@@ -406,6 +476,8 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     const rotationUrl = useRef(options.urls.rotate_webhook_secret)
     const canvas = useRef<CanvasActions | null>(null)
     const measuredRef = useRef(new Map<string, Measured>())
+    /** Measured sizes the last layout used (heights the layout reserved). */
+    const reservedRef = useRef(new Map<string, Measured>())
     const canvasNodeCache = useRef(new Map<string, CanvasNodeEntry>())
     const canvasEdgeCache = useRef(new Map<string, CanvasEdgeEntry>())
     const optionsCache = useRef(new Map<string, Record<string, string>>())
@@ -414,7 +486,15 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     const built = useMemo(() => toGraph(document, document.startId, defs), [document, defs])
     const builtRef = useRef(built)
     builtRef.current = built
-    const autosave = useAutosave({ url: options.urls.draft, sessionIdentity: options.urls.publish, initialRevision: options.flow.draft_revision, graph: built.graph, debounceMs: options.autosaveDebounceMs })
+    // A read-only session never saves: autosave only ever sees the graph it opened with.
+    const openedGraph = useRef(built.graph)
+    const autosave = useAutosave({ url: options.urls.draft, sessionIdentity: options.urls.publish, initialRevision: options.flow.draft_revision, graph: readOnly ? openedGraph.current : built.graph, debounceMs: options.autosaveDebounceMs })
+    // "Unpublished changes" compares what the graph does (positions left out) with
+    // the live version: an edit undone, or a Tidy, is not an unpublished change.
+    const currentSemantic = useMemo(() => semanticKey(built.graph), [built])
+    const openedSemantic = useRef(currentSemantic)
+    const [publishedBaseline, setPublishedBaseline] = useState<string | null>(() => options.flow.has_unpublished_changes === true ? null : openedSemantic.current)
+    const unpublishedChanges = publishedBaseline === null || publishedBaseline !== currentSemantic
     const applyPendingWebhookMetadata = useCallback(() => {
         const pending = pendingWebhookMetadata.current
         pendingWebhookMetadata.current = null
@@ -492,6 +572,7 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     }, [])
 
     const commit = useCallback((next: EditorDocument, transaction: string | null = null) => {
+        if (readOnlyRef.current) return false
         const current = historyRef.current
         if (sameDocument(current.present, next)) return false
         const snapshot = snapshotDocument(next, current.present)
@@ -505,6 +586,45 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         return true
     }, [clearValidation])
 
+    /** Adding or removing a node or a connection re-lays the whole graph out. */
+    const commitLaidOut = useCallback((next: EditorDocument, transaction: string | null = null) => {
+        reservedRef.current = new Map(measuredRef.current)
+        return commit(laidOutDocument(next, defs, measuredRef.current), transaction)
+    }, [commit, defs])
+
+    /** The height the last layout kept for a node: its estimate, or what was measured then. */
+    const reservedHeight = useCallback((id: string) => {
+        const type = documentRef.current.nodes.find((node) => node.id === id)?.data.type
+        const outputs = type !== undefined && Object.prototype.hasOwnProperty.call(defs, type) ? defs[type]!.outputs?.length ?? 0 : 0
+        return Math.max(estimatedNodeHeight(outputs), reservedRef.current.get(id)?.height ?? 0)
+    }, [defs])
+
+    /**
+     * A card grew taller than its reserved space (errors appeared, a host body
+     * expanded): lay out again in place, so neighbours never overlap. It is a
+     * view correction, not an author's edit, so it adds no undo step.
+     */
+    const relayoutFrame = useRef<number | null>(null)
+    const scheduleRelayout = useCallback(() => {
+        if (relayoutFrame.current !== null || typeof requestAnimationFrame === 'undefined') return
+        relayoutFrame.current = requestAnimationFrame(() => {
+            relayoutFrame.current = null
+            if (!mounted.current) return
+            const current = historyRef.current
+            reservedRef.current = new Map(measuredRef.current)
+            const next = laidOutDocument(current.present, defs, measuredRef.current)
+            if (sameDocument(next, current.present)) return
+            const snapshot = snapshotDocument(next, current.present)
+            const replaced = { ...current, present: snapshot }
+            historyRef.current = replaced
+            documentRef.current = snapshot
+            setHistory(replaced)
+        })
+    }, [defs])
+    useEffect(() => () => {
+        if (relayoutFrame.current !== null) cancelAnimationFrame(relayoutFrame.current)
+    }, [])
+
     const closeConfigTransaction = useCallback(() => {
         const next = closeTransaction(historyRef.current)
         historyRef.current = next
@@ -515,37 +635,32 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         if (definition.kind !== 'executable') return
         const current = documentRef.current
         const id = nextNodeId(definition.type, new Set(current.nodes.map((node) => node.id)))
-        const topology = hierarchicalLayout([...current.nodes.map((node) => node.id), id], current.edges.map((edge) => ({ from: edge.source, to: edge.target })), current.startId || id)
-        const position = availablePoint(point ?? topology[id] ?? CANVAS_ORIGIN, current.nodes)
-        const next: NodeflowNode = { id, type: 'nodeflowNode', position, data: { id, type: definition.type, kind: 'executable', config: copiedConfig(definition), isStart: false } }
-        if (commit({ nodes: [...current.nodes, next], edges: current.edges, startId: current.startId })) {
+        // The layout decides where it goes; a drop point only seeds it.
+        const next: NodeflowNode = { id, type: 'nodeflowNode', position: point ?? CANVAS_ORIGIN, data: { id, type: definition.type, kind: 'executable', config: copiedConfig(definition), isStart: false } }
+        if (commitLaidOut({ nodes: [...current.nodes, next], edges: current.edges, startId: current.startId })) {
+            pendingCenter.current = id
             setSelected({ nodeId: id, edgeId: null })
             setView((currentView) => ({ ...currentView, inspectorOpen: true }))
         }
-    }, [commit])
+    }, [commitLaidOut])
 
     const addTrigger = useCallback((definition: TriggerNodeTypePayload, point?: { x: number; y: number }) => {
         if (definition.kind !== 'trigger' || !hasRegisteredTriggerSource(definition, options.trigger_sources)) return
         const current = documentRef.current
         if (current.nodes.some((node) => defs[node.data.type]?.kind === 'trigger')) return
         const id = nextNodeId(definition.type, new Set(current.nodes.map((node) => node.id)))
-        const topology = hierarchicalLayout(
-            [...current.nodes.map((node) => node.id), id],
-            current.edges.map((edge) => ({ from: edge.source, to: edge.target })),
-            id,
-        )
-        const position = availablePoint(point ?? topology[id] ?? CANVAS_ORIGIN, current.nodes)
         const next: NodeflowNode = {
             id,
             type: 'nodeflowNode',
-            position,
+            position: point ?? CANVAS_ORIGIN,
             data: { id, type: definition.type, kind: 'trigger', config: copiedTriggerConfig(definition, options.trigger_sources), isStart: true },
         }
-        if (commit({ nodes: [...current.nodes, next], edges: current.edges, startId: id })) {
+        if (commitLaidOut({ nodes: [...current.nodes, next], edges: current.edges, startId: id })) {
+            pendingCenter.current = id
             setSelected({ nodeId: id, edgeId: null })
             setView((currentView) => ({ ...currentView, inspectorOpen: true }))
         }
-    }, [commit, defs, options.trigger_sources])
+    }, [commitLaidOut, defs, options.trigger_sources])
 
     const replaceTrigger = useCallback((definition: TriggerNodeTypePayload) => {
         if (definition.kind !== 'trigger' || !hasRegisteredTriggerSource(definition, options.trigger_sources)) return
@@ -583,14 +698,14 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
             return preserved?.id === edge.id ? [preserved] : []
         })
 
-        if (commit({ nodes: remainingNodes, edges, startId: retained.id })) {
+        if (commitLaidOut({ nodes: remainingNodes, edges, startId: retained.id })) {
             setSelected((selection) => {
                 if (removedIds.has(selection.nodeId ?? '')) return { nodeId: retained.id, edgeId: null }
                 return { nodeId: selection.nodeId, edgeId: null }
             })
             setView((currentView) => ({ ...currentView, selectedEdgeId: null }))
         }
-    }, [addTrigger, commit, defs, options.trigger_sources])
+    }, [addTrigger, commitLaidOut, defs, options.trigger_sources])
 
     const addAtViewportCenter = useCallback((definition: NodeTypePayload) => {
         const actions = canvas.current
@@ -625,10 +740,10 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         const nextNodes = current.nodes.filter((node) => node.id !== id)
         if (nextNodes.length === current.nodes.length) return
         const removesTrigger = removedNode !== undefined && defs[removedNode.data.type]?.kind === 'trigger'
-        commit({ nodes: nextNodes, edges: current.edges.filter((edge) => edge.source !== id && edge.target !== id), startId: removesTrigger || current.startId === id ? '' : current.startId })
+        commitLaidOut({ nodes: nextNodes, edges: current.edges.filter((edge) => edge.source !== id && edge.target !== id), startId: removesTrigger || current.startId === id ? '' : current.startId })
         setSelected((selection) => selection.nodeId === id ? { nodeId: null, edgeId: null } : selection)
         setView((current) => ({ ...current, selectedEdgeId: null }))
-    }, [commit, defs])
+    }, [commitLaidOut, defs])
 
     const nodesChange = useCallback((changes: NodeChange<NodeflowNode>[]) => {
         const selectionChanges = changes.filter((change) => change.type === 'select')
@@ -647,9 +762,13 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         // Measured size is React Flow's view state. It is remembered so a node
         // object rebuilt later still carries it, but it never becomes a graph
         // edit, a history entry or an autosave.
+        let grew = false
         for (const change of graphChanges) {
-            if (change.type === 'dimensions' && change.dimensions !== undefined) measuredRef.current.set(change.id, { width: change.dimensions.width, height: change.dimensions.height })
+            if (change.type !== 'dimensions' || change.dimensions === undefined) continue
+            measuredRef.current.set(change.id, { width: change.dimensions.width, height: change.dimensions.height })
+            if (change.dimensions.height > reservedHeight(change.id) + 1) grew = true
         }
+        if (grew) scheduleRelayout()
         const removed = new Set(graphChanges.filter((change) => change.type === 'remove').map((change) => change.id))
         if (graphChanges.every((change) => change.type === 'dimensions')) return
         const current = documentRef.current
@@ -657,10 +776,13 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         const removesTrigger = current.nodes.some((node) => removed.has(node.id) && defs[node.data.type]?.kind === 'trigger')
         const position = graphChanges.find((change) => change.type === 'position')
         const transaction = position?.type === 'position' ? `move:${position.id}` : null
-        commit({ nodes, edges: removed.size === 0 ? current.edges : current.edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target)), startId: removesTrigger || removed.has(current.startId) ? '' : current.startId }, transaction)
+        const nextDocument = { nodes, edges: removed.size === 0 ? current.edges : current.edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target)), startId: removesTrigger || removed.has(current.startId) ? '' : current.startId }
+        // A drag only moves; removing a node is structural and re-lays out.
+        if (removed.size > 0) commitLaidOut(nextDocument, transaction)
+        else commit(nextDocument, transaction)
         if (position?.type === 'position' && position.dragging === false) closeConfigTransaction()
         if (removed.size > 0) setSelected((selection) => removed.has(selection.nodeId ?? '') || current.edges.some((edge) => edge.id === selection.edgeId && (removed.has(edge.source) || removed.has(edge.target))) ? { nodeId: null, edgeId: null } : selection)
-    }, [closeConfigTransaction, commit, defs, selectNode])
+    }, [closeConfigTransaction, commit, commitLaidOut, defs, reservedHeight, scheduleRelayout, selectNode])
 
     const edgesChange = useCallback((changes: EdgeChange<NodeflowEdge>[]) => {
         const selectionChanges = changes.filter((change) => change.type === 'select')
@@ -677,12 +799,13 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         if (graphChanges.length === 0) return
         const current = documentRef.current
         const edges = stripEdgeSelection(applyEdgeChanges(graphChanges, current.edges))
-        commit({ ...current, edges })
+        if (graphChanges.some((change) => change.type === 'remove')) commitLaidOut({ ...current, edges })
+        else commit({ ...current, edges })
         if (graphChanges.some((change) => change.type === 'remove')) {
             setSelected((selection) => ({ ...selection, edgeId: null }))
             setView((current) => ({ ...current, selectedEdgeId: null }))
         }
-    }, [commit, selectEdge])
+    }, [commit, commitLaidOut, selectEdge])
 
     const connect = useCallback((connection: Connection) => {
         if (connection.source === null || connection.target === null || connection.sourceHandle === null) return
@@ -696,8 +819,8 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         if (!canConnect(source.data.type, connection.sourceHandle, defs)) return
         if (current.edges.some((edge) => edge.source === connection.source && edge.sourceHandle === connection.sourceHandle)) return
         if (wouldCreateCycle(current.edges, connection.source, connection.target)) return
-        commit({ ...current, edges: addEdge<NodeflowEdge>({ ...connection, label: connection.sourceHandle }, current.edges) })
-    }, [commit, defs])
+        commitLaidOut({ ...current, edges: addEdge<NodeflowEdge>({ ...connection, label: connection.sourceHandle }, current.edges) })
+    }, [commitLaidOut, defs])
 
     const configure = useCallback((id: string, key: string, value: unknown) => {
         const current = documentRef.current
@@ -756,14 +879,14 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         if (selected.nodeId !== null) {
             deleteNode(selected.nodeId)
         } else if (selected.edgeId !== null) {
-            commit({ ...current, edges: current.edges.filter((edge) => edge.id !== selected.edgeId) })
+            commitLaidOut({ ...current, edges: current.edges.filter((edge) => edge.id !== selected.edgeId) })
             selectEdge(null)
         }
-    }, [commit, deleteNode, selectEdge, selected])
+    }, [commitLaidOut, deleteNode, selectEdge, selected])
 
     const moveHistory = useCallback((direction: 'undo' | 'redo') => {
         const next = direction === 'undo' ? undoHistory(historyRef.current) : redoHistory(historyRef.current)
-        if (next === historyRef.current) return
+        if (next === historyRef.current || readOnlyRef.current) return
         historyRef.current = next
         setHistory(next)
         generation.current += 1
@@ -773,10 +896,19 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     }, [clearValidation])
 
     const autoLayout = useCallback(() => {
-        const current = documentRef.current
-        const positions = hierarchicalLayout(current.nodes.map((node) => node.id), current.edges.map((edge) => ({ from: edge.source, to: edge.target })), current.startId)
-        commit({ ...current, nodes: current.nodes.map((node) => ({ ...node, position: positions[node.id] ?? node.position })) })
-    }, [commit])
+        commitLaidOut(documentRef.current)
+        // Tidy also frames the result, once React Flow has the new positions.
+        requestAnimationFrame(() => canvas.current?.fit())
+    }, [commitLaidOut])
+
+    // A new node can land anywhere the layout puts it: bring it into view.
+    useEffect(() => {
+        const id = pendingCenter.current
+        if (id === null) return
+        pendingCenter.current = null
+        const frame = requestAnimationFrame(() => canvas.current?.centerNode(id))
+        return () => cancelAnimationFrame(frame)
+    }, [document])
 
     const resolveConflict = useCallback((choice: 'mine' | 'theirs') => {
         if (choice === 'mine') {
@@ -798,6 +930,7 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     }, [autosave, clearValidation, defs])
 
     const validate = useCallback(async () => {
+        if (readOnlyRef.current) return
         const request = ++validationSequence.current
         const requestGeneration = generation.current
         const url = options.urls.validate
@@ -828,10 +961,12 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     }, [options.urls.validate])
 
     const publish = useCallback(async () => {
-        if (!mounted.current || activePublish.current !== null || activeCredentialOperation.current !== null) return
+        if (readOnlyRef.current || !mounted.current || activePublish.current !== null || activeCredentialOperation.current !== null) return
         const currentBuilt = builtRef.current
         if (currentBuilt.unresolved.length > 0) {
-            setPublishOutcome({ kind: 'failed', message: 'Choose which output each unresolved connection should use before publishing.' })
+            const message = 'Choose which output each unresolved connection should use before publishing.'
+            setPublishOutcome({ kind: 'failed', message })
+            showToast({ kind: 'error', reason: message })
             return
         }
         const attempt = ++publishSequence.current
@@ -850,7 +985,11 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
             && activeCredentialOperation.current.attempt === credentialAttempt
         const readyRevision = await autosave.preparePublish()
         if (readyRevision === false) {
-            if (owns() && publishedGeneration === generation.current) setPublishOutcome({ kind: 'failed', message: autosave.message ?? 'The draft could not be saved before publishing.' })
+            if (owns() && publishedGeneration === generation.current) {
+                const message = autosave.message ?? 'The draft could not be saved before publishing.'
+                setPublishOutcome({ kind: 'failed', message })
+                showToast({ kind: 'error', reason: message })
+            }
             if (owns()) {
                 applyPendingWebhookMetadata()
                 activePublish.current = null
@@ -866,7 +1005,10 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
             })
             if (result.status === 409) {
                 autosave.finishPublish(undefined, result.data)
-                if (owns() && publishedGeneration === generation.current) setPublishOutcome(null)
+                if (owns() && publishedGeneration === generation.current) {
+                    setPublishOutcome(null)
+                    showToast({ kind: 'error', reason: typeof result.data?.message === 'string' && result.data.message !== '' ? result.data.message : 'This workflow changed elsewhere. Choose which version to keep.' })
+                }
                 return
             }
             const next = interpretPublish(result, new Set(documentRef.current.nodes.map((node) => node.id)))
@@ -909,14 +1051,24 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
                     })
                 }
             }
+            if (next.kind === 'published') {
+                // What is live now is the graph this request sent; later edits stay unpublished.
+                setPublishedBaseline(semanticKey(currentBuilt.graph))
+                setPublication({ version: next.version, publishedAt: next.publishedAt ?? new Date().toISOString(), publishedBy: next.publishedBy ?? null })
+                showToast({ kind: 'success', version: next.version })
+            }
             if (publishedGeneration !== generation.current) return
-            if (next.kind === 'published') setPublishedVersion(next.version)
+            if (next.kind !== 'published') showToast({ kind: 'error', reason: publishFailureReason(next, labels) })
             setPublishOutcome(next.kind === 'published'
                 ? { kind: 'published', version: next.version, revision: next.revision }
                 : next)
         } catch (reason: unknown) {
             autosave.finishPublish()
-            if (owns() && publishedGeneration === generation.current) setPublishOutcome({ kind: 'failed', message: `Could not reach server to publish this flow: ${String(reason)}` })
+            if (owns() && publishedGeneration === generation.current) {
+                const message = `Could not reach server to publish this flow: ${String(reason)}`
+                setPublishOutcome({ kind: 'failed', message })
+                showToast({ kind: 'error', reason: message })
+            }
         } finally {
             if (owns()) {
                 if (!credentialMetadataCommitted) applyPendingWebhookMetadata()
@@ -925,7 +1077,8 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
                 setPublishing(false)
             }
         }
-    }, [applyPendingWebhookMetadata, autosave, defs, options.urls.publish])
+    }, [applyPendingWebhookMetadata, autosave, defs, labels, options.urls.publish, showToast])
+
 
     const rotateWebhookSecret = useCallback(async () => {
         if (!mounted.current || activeRotation.current !== null || activeCredentialOperation.current !== null) return
@@ -1089,11 +1242,14 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         view,
         actions,
         optionsSource,
-        canvasProps: { nodes: canvasNodes, edges: canvasEdges, defs, renderers: options.nodeRenderers, nodeErrors, onNodesChange: nodesChange, onEdgesChange: edgesChange, onConnect: connect, onNodeClick: selectNode, onEdgeClick: selectEdge, onPaneClick: () => { selectNode(null) }, onDropNodeType: (type, point) => { const definition = Object.prototype.hasOwnProperty.call(defs, type) ? defs[type] : undefined; if (definition?.kind === 'executable') addNode(definition, point); else if (definition?.kind === 'trigger') addTrigger(definition, point) }, onReady: (next) => { canvas.current = next }, onDispose: (old) => { if (canvas.current === old) canvas.current = null }, interactive: true, deleteKeyCode: null },
+        canvasProps: { nodes: canvasNodes, edges: canvasEdges, defs, renderers: options.nodeRenderers, nodeErrors, onNodesChange: readOnly ? undefined : nodesChange, onEdgesChange: readOnly ? undefined : edgesChange, onConnect: readOnly ? undefined : connect, onNodeClick: selectNode, onEdgeClick: readOnly ? undefined : selectEdge, onPaneClick: () => { selectNode(null) }, onDropNodeType: readOnly ? undefined : (type, point) => { const definition = Object.prototype.hasOwnProperty.call(defs, type) ? defs[type] : undefined; if (definition?.kind === 'executable') addNode(definition, point); else if (definition?.kind === 'trigger') addTrigger(definition, point) }, onReady: (next) => { canvas.current = next }, onDispose: (old) => { if (canvas.current === old) canvas.current = null }, interactive: !readOnly, deleteKeyCode: null },
         canvasHudProps: { nodeCount: document.nodes.length, connectionCount: document.edges.length, validation: validationState },
-        toolbarProps: { flowName: options.flow.name, triggerLabel: trigger?.label ?? 'No trigger', publishedVersion, save, validation: validationState, publish: publishIndicator, publishDisabledReason, credentialBusy: publishing || webhookRotating, canUndo: history.past.length > 0, canRedo: history.future.length > 0, hasSelection: selected.nodeId !== null || selected.edgeId !== null, onUndo: () => moveHistory('undo'), onRedo: () => moveHistory('redo'), onAutoLayout: autoLayout, onFit: () => canvas.current?.fit(), onDeleteSelected: deleteSelection, onValidate: () => { void validate() }, onPublish: () => { if (publishDisabledReason === null) void publish() } },
-        noticeProps: { save, publish: publishIndicator, validation: validationState, structuralError: message.structural, graphMessages: [...message.graph, ...(message.failed === undefined ? [] : [message.failed])], validationMessage: validation?.kind === 'failed' ? validation.message : undefined, onKeepMine: () => resolveConflict('mine'), onUseTheirs: () => resolveConflict('theirs') },
+        toolbarProps: { flowName: options.flow.name, context: options.context ?? null, labels, publication, unpublishedChanges, readOnly, triggerLabel: trigger?.label ?? 'No trigger', publishedVersion, save, validation: validationState, publish: publishIndicator, publishDisabledReason, credentialBusy: publishing || webhookRotating, canUndo: history.past.length > 0, canRedo: history.future.length > 0, hasSelection: selected.nodeId !== null || selected.edgeId !== null, onUndo: () => moveHistory('undo'), onRedo: () => moveHistory('redo'), onAutoLayout: autoLayout, onFit: () => canvas.current?.fit(), onDeleteSelected: deleteSelection, onValidate: () => { void validate() }, onPublish: () => { if (publishDisabledReason === null) void publish() } },
+        noticeProps: { save, validation: validationState, structuralError: message.structural, graphMessages: [...message.graph, ...(message.failed === undefined ? [] : [message.failed])], validationMessage: validation?.kind === 'failed' ? validation.message : undefined, onKeepMine: () => resolveConflict('mine'), onUseTheirs: () => resolveConflict('theirs') },
         flowOverviewProps: { flow: { name: options.flow.name }, trigger: trigger === null ? null : { label: trigger.label, type: trigger.type }, triggerReadiness: publishDisabledReason, publishedVersion, nodeCount: document.nodes.length, connectionCount: document.edges.length, startNodeId: document.startId || null, validation: validationState, issues: graphIssues(activeOutcome), warnings: validation?.kind === 'valid' ? validation.warnings : validation?.kind === 'invalid' ? validation.warnings : [], errors: message.graph, unknownTypes, unresolvedOutputs: built.unresolved.map((edge) => ({ from: edge.source, to: edge.target })), onIssueSelect: (issue) => focusIssue(issue.node, issue.field) },
-        nodeInspectorProps: selectedNode === undefined ? null : { node: selectedNode.data, def: defs[selectedNode.data.type], controls, errors: fieldErrors, issueToFocus, triggerSources: options.trigger_sources, triggerOptionsTemplate: options.urls.trigger_options, triggerSourceOptionsTemplate: options.urls.trigger_source_options, onConfigChange: (key, value) => configure(selectedNode.id, key, value), onTriggerSourceChange: (source) => configureTriggerSource(selectedNode.id, source), onConfigBlur: closeConfigTransaction, webhook: webhookMetadata, webhookSecret, webhookPublishing: publishing, webhookRotating, webhookRotationError, onAcknowledgeWebhookSecret: () => setWebhookState((current) => ({ ...current, disclosure: null })), onRotateWebhookSecret: () => { void rotateWebhookSecret() }, onDelete: () => deleteNode(selectedNode.id) },
+        toastProps: { toast, labels, onDismiss: dismissToast },
+        labels,
+        readOnly,
+        nodeInspectorProps: selectedNode === undefined ? null : { readOnly, node: selectedNode.data, def: defs[selectedNode.data.type], controls, errors: fieldErrors, issueToFocus, triggerSources: options.trigger_sources, triggerOptionsTemplate: options.urls.trigger_options, triggerSourceOptionsTemplate: options.urls.trigger_source_options, onConfigChange: (key, value) => configure(selectedNode.id, key, value), onTriggerSourceChange: (source) => configureTriggerSource(selectedNode.id, source), onConfigBlur: closeConfigTransaction, webhook: webhookMetadata, webhookSecret, webhookPublishing: publishing, webhookRotating, webhookRotationError, onAcknowledgeWebhookSecret: () => setWebhookState((current) => ({ ...current, disclosure: null })), onRotateWebhookSecret: () => { void rotateWebhookSecret() }, onDelete: () => deleteNode(selectedNode.id) },
     }
 }

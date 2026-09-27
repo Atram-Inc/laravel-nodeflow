@@ -11,6 +11,8 @@ export type EditorShellProps = {
     inspector: ReactNode
     notices?: ReactNode
     className?: string
+    /** False hides the Node Library and its toggle (read-only mode). */
+    showLibrary?: boolean
     libraryOpen: boolean
     inspectorOpen: boolean
     onLibraryOpenChange: (open: boolean) => void
@@ -64,7 +66,8 @@ function useNarrowViewport(): boolean {
 }
 
 /** One responsive DOM shell: grid panels at large widths, focus-managed drawers below lg. */
-export function EditorShell({ mode, toolbar, library, canvas, inspector, notices, className, libraryOpen, inspectorOpen, onLibraryOpenChange, onInspectorOpenChange }: EditorShellProps) {
+export function EditorShell({ mode, toolbar, library, canvas, inspector, notices, className, libraryOpen: requestedLibraryOpen, inspectorOpen, onLibraryOpenChange, onInspectorOpenChange, showLibrary = true }: EditorShellProps) {
+    const libraryOpen = showLibrary && requestedLibraryOpen
     const isNarrow = useNarrowViewport()
     const [libraryWidth, setLibraryWidth] = useState(320)
     const [inspectorWidth, setInspectorWidth] = useState(320)
@@ -214,7 +217,7 @@ export function EditorShell({ mode, toolbar, library, canvas, inspector, notices
             <main className="relative col-start-1 min-h-0 overflow-hidden bg-background lg:col-start-3">
                 {canvas}
                 <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-2">
-                    {(!isNarrow || !libraryDrawerOpen) ? <button ref={libraryTrigger} type="button" aria-label={libraryToggleLabel} title={libraryToggleLabel} aria-expanded={libraryPanelOpen} onClick={isNarrow ? openLibrary : () => onLibraryOpenChange(!libraryOpen)} className={toggleClass}><NodeflowIcon name="panel-left" className="size-4" /></button> : <span />}
+                    {!showLibrary ? <span /> : (!isNarrow || !libraryDrawerOpen) ? <button ref={libraryTrigger} type="button" aria-label={libraryToggleLabel} title={libraryToggleLabel} aria-expanded={libraryPanelOpen} onClick={isNarrow ? openLibrary : () => onLibraryOpenChange(!libraryOpen)} className={toggleClass}><NodeflowIcon name="panel-left" className="size-4" /></button> : <span />}
                     {(!isNarrow || !inspectorDrawerOpen) && <button ref={inspectorTrigger} type="button" aria-label={inspectorToggleLabel} title={inspectorToggleLabel} aria-expanded={inspectorPanelOpen} onClick={isNarrow ? openInspector : () => onInspectorOpenChange(!inspectorOpen)} className={toggleClass}><NodeflowIcon name="panel-right" className="size-4" /></button>}
                 </div>
                 {isNarrow && (libraryDrawerOpen || inspectorDrawerOpen) && <div aria-hidden="true" onClick={() => { if (inspectorDrawerOpen) onInspectorOpenChange(false); else onLibraryOpenChange(false) }} className="fixed inset-0 z-20 bg-foreground/20" />}

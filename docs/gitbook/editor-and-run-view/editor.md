@@ -90,7 +90,7 @@ The flow's `version` reports the current published version even while the draft 
 
 Use the **Node Library** to search executable labels, groups, descriptions, and type names. Its **Trigger Library** lists the server-authored trigger palette separately. A graph can contain only one trigger: choosing another asks for confirmation and replaces the existing trigger while preserving the one-trigger invariant. A trigger is disabled with “No compatible trigger source is registered” until the host registers an allowlisted source for its driver.
 
-Click an executable result to add it at a sensible open canvas position, or drag it onto the canvas to place it at the drop point, nudged only when needed to avoid overlap. Select a card to configure fields in **Configure**; source fields are merged into the trigger's flat config after `source` is selected. With no selection, the inspector shows **Flow Overview**, trigger readiness, and webhook details when applicable.
+Click an executable result or drag it onto the canvas to add it; the automatic layout places it and the canvas brings it into view. Select a card to configure fields in **Configure**; source fields are merged into the trigger's flat config after `source` is selected. With no selection, the inspector shows **Flow Overview**, trigger readiness, and webhook details when applicable.
 
 The package toolbar and canvas expose the same actions for pointer and keyboard users:
 
@@ -99,10 +99,16 @@ The package toolbar and canvas expose the same actions for pointer and keyboard 
 | Undo / Redo | Toolbar buttons; `Cmd/Ctrl+Z` and `Cmd/Ctrl+Shift+Z`. |
 | Delete selection | Toolbar button; `Delete` / `Backspace`. |
 | Focus Node Library search | `Cmd/Ctrl+K`. |
-| Auto layout | **Auto layout** arranges every node; it is an ordinary graph edit and can be undone. |
-| Auto layout shortcut | `Shift+L`. |
+| Tidy | **Tidy** lays every node out again and frames the result; it is an ordinary graph edit and can be undone. |
+| Tidy shortcut | `Shift+L`. |
 | Frame the graph | **Fit** frames all nodes; `F` frames the graph. Use canvas zoom controls or gestures for closer inspection. |
 | Orientation | The minimap shows the current viewport and supports pan/zoom navigation. |
+
+### Automatic layout
+
+Flows read strictly left to right. The layout (`layoutGraph` in `graph/layout.ts`) puts every node one column after its furthest predecessor, fans the branches of a node out vertically around it in the order of its outputs, and keeps a free horizontal lane in every column an edge jumps over, so no edge crosses a node. Groups not connected to the start stack below. The same graph always lays out the same way.
+
+It runs when a flow opens (stored positions are not read), after every structural change (adding or removing a node or a connection, replacing the trigger) and on **Tidy**. Dragging a node still works; the next structural change lays it out again. Node heights come from each type's outputs until React Flow has measured the cards, then from the measured size.
 
 Shortcuts are suppressed while typing in inputs, textareas, selects, contenteditable elements, or host controls. On narrow viewports, the Node Library and inspector become drawers; `Escape` closes an open drawer and returns focus to its trigger.
 
@@ -125,6 +131,16 @@ Saving, validation, and publishing are distinct operations:
 Validation succeeds with `{"valid":true,"warnings":[]}` (warnings may be non-empty). Semantic validation returns HTTP 422 with `valid: false`, `message: "The flow is not ready to publish."`, `errors`, `node_errors`, and `warnings`; structural request failures use Laravel's normal validation-error response. The endpoint uses the same `publish` authorization as Publish and is non-mutating.
 
 Publishing first waits for an accepted draft save. If that prerequisite draft `PUT` conflicts or fails, no publish `POST` is made and the autosave hook remains halted; resolve the conflict or preserve the visible changes and reload/remount before trying again. Once the prerequisite draft save succeeds, an ordinary failed publish `POST` releases the publish barrier without changing the draft revision, so later graph changes can autosave.
+
+### Publish feedback
+
+**Publish** keeps its label. While the request runs it shows a spinner and is disabled; the answer is a toast: "Published v4" for a moment, or "Could not publish" with the reason until dismissed. Next to the button the toolbar shows the live version as text ("v3 · published 2 minutes ago by Thomas", from the `flow.published_at` and `flow.published_by` props) and an **Unpublished changes** state while the draft differs from the live version (`flow.has_unpublished_changes` on load, then every edit until the next publish). The package stores the publisher's auth identifier; register `Nodeflow::describePublishersUsing(fn (string $id): ?string => ...)` to name them. The publish response carries `published_at` and `published_by` too.
+
+Hosts translate this chrome with the `labels` prop (see `EditorLabels`, English by default) and can say what is being edited with `context` ("Default template, applies to new FSPs"), shown under the flow name.
+
+### Read-only mode
+
+`<FlowEditor readOnly />` shows the same canvas and the same inspector forms with every field disabled (a disabled fieldset, plus `useEditorReadOnly()` for host controls that render their own actions) and a **View only** badge. There is no Node Library, save, validate, publish, delete, dragging or connecting, and nothing is sent to the draft or publish URLs. The server must still refuse writes for read-only users.
 
 The publish results are intentionally separate:
 

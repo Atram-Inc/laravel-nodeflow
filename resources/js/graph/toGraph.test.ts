@@ -64,7 +64,8 @@ describe('toGraph', () => {
     const converted = toGraph(canvas, 'trigger1', customDefs)
 
     expect(canvas.nodes.map((node) => node.data.kind)).toEqual(['trigger', 'executable'])
-    expect(converted.graph).toEqual(triggerGraph)
+    // Positions come from the layout; everything else round-trips exactly.
+    expect(converted.graph).toEqual({ ...triggerGraph, nodes: triggerGraph.nodes!.map((node, index) => ({ ...node, position: canvas.nodes[index]!.position })) })
     expect(converted.unresolved).toEqual([])
   })
 
@@ -88,9 +89,11 @@ describe('toGraph', () => {
   // Counterfactual: drop `position` from the emitted node, or drop `config`, or
   // emit `start` from anywhere but the argument, and this fails.
   it('round-trips start, ids, config, position and edge outputs', () => {
-    const { graph: out, unresolved } = toGraph(toCanvas(graph), graph.start ?? '', defs)
+    const canvas = toCanvas(graph)
+    const { graph: out, unresolved } = toGraph(canvas, graph.start ?? '', defs)
 
-    expect(out).toEqual(graph)
+    // Positions come from the layout (stored ones are not read); they still reach the graph.
+    expect(out).toEqual({ ...graph, nodes: graph.nodes!.map((node, index) => ({ ...node, position: canvas.nodes[index]!.position })) })
     expect(unresolved).toEqual([])
     expect(Object.getPrototypeOf(defs)).toBeNull()
     expect(defs['__proto__']?.outputs).toEqual(['own-proto'])

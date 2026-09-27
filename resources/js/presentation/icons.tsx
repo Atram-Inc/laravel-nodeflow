@@ -5,7 +5,7 @@ export type NodeIconName =
     | 'bolt' | 'message' | 'filter' | 'calendar' | 'branch' | 'database' | 'globe' | 'user'
     | 'settings' | 'play' | 'pause' | 'check' | 'alert' | 'plus' | 'search' | 'close'
     | 'undo' | 'redo' | 'chevron-left' | 'chevron-right' | 'panel-left' | 'panel-right'
-    | 'layout' | 'copy' | 'trash' | 'info' | 'minus' | 'fit' | 'more'
+    | 'layout' | 'copy' | 'trash' | 'info' | 'minus' | 'fit' | 'more' | 'spinner' | 'eye'
 
 type NodeflowIconProps = Pick<SVGProps<SVGSVGElement>, 'className'> & { name: NodeIconName }
 
@@ -39,6 +39,8 @@ const paths: Record<NodeIconName, React.ReactNode> = {
     minus: <path d="M5 12h14" />,
     fit: <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />,
     more: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
+    spinner: <path d="M21 12a9 9 0 1 1-6.2-8.6" />,
+    eye: <><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
 }
 
 export function NodeflowIcon({ name, className }: NodeflowIconProps) {

@@ -8,6 +8,7 @@ import { triggerSourceOptionsTemplate } from '../http'
 import { AvailableData } from './AvailableData'
 import type { NodeDataContext } from './nodeData'
 import { ConfigPanel } from './ConfigPanel'
+import { EditorReadOnlyContext } from './readOnly'
 import { NodeflowIcon } from '../presentation/icons'
 import { categoryClasses, categoryPresentation } from '../presentation/node'
 import { WebhookDetails } from './WebhookDetails'
@@ -36,6 +37,8 @@ export type NodeInspectorProps = {
     onRotateWebhookSecret?: () => void
     data?: NodeDataContext
     onDelete: () => void
+    /** Every field disabled, no delete or credential actions. */
+    readOnly?: boolean
 }
 
 function ownSources(sources: TriggerSourcesPayload, driver: string): TriggerSourcePayload[] {
@@ -71,6 +74,7 @@ export function NodeInspector({
     onRotateWebhookSecret = () => {},
     onDelete,
     data,
+    readOnly = false,
 }: NodeInspectorProps) {
     const generatedId = useId().replace(/:/g, '')
     const [activeTab, setActiveTab] = useState<InspectorTab>('configure')
@@ -256,9 +260,14 @@ export function NodeInspector({
                     {def?.kind === 'trigger' && compatibleSources.length === 0 && (
                         <p className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-foreground">Register a compatible trigger source in the host application before this trigger can be published.</p>
                     )}
-                    <ConfigPanel node={node} def={composedDef} controls={controls} errors={localErrors} onConfigChange={changeConfig} onFieldBlur={onConfigBlur} fieldOptionsSources={fieldOptionsSources} data={data} />
+                    <EditorReadOnlyContext.Provider value={readOnly}>
+                        {/* A disabled fieldset disables every native control inside, host controls included. */}
+                        <fieldset disabled={readOnly} data-nodeflow-readonly={readOnly ? '' : undefined} className="min-w-0 space-y-5 border-0 p-0 disabled:[&_input]:opacity-70 disabled:[&_select]:opacity-70 disabled:[&_textarea]:opacity-70">
+                            <ConfigPanel node={node} def={composedDef} controls={controls} errors={localErrors} onConfigChange={readOnly ? () => {} : changeConfig} onFieldBlur={onConfigBlur} fieldOptionsSources={fieldOptionsSources} data={data} />
+                        </fieldset>
+                    </EditorReadOnlyContext.Provider>
                     {data && <AvailableData data={data} />}
-                    {def?.kind === 'trigger' && def.driver === 'webhook' && (
+                    {def?.kind === 'trigger' && def.driver === 'webhook' && !readOnly && (
                         <WebhookDetails
                             metadata={webhook}
                             oneTimeSecret={webhookSecret}
@@ -279,12 +288,12 @@ export function NodeInspector({
                     <div className="space-y-0.5"><dt className="text-xs font-medium text-muted-foreground">Cardinality</dt><dd>{empty(def?.kind === 'executable' ? def.cardinality : [])}</dd></div>
                     <div className="space-y-0.5"><dt className="text-xs font-medium text-muted-foreground">Declared outputs</dt><dd>{empty(def?.outputs ?? [])}</dd></div>
                 </dl>
-                <div className="space-y-2 border-t border-border pt-4">
+                {!readOnly && <div className="space-y-2 border-t border-border pt-4">
                     <button type="button" onClick={onDelete} className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-destructive/40 bg-card px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive">
                         <NodeflowIcon name="trash" className="size-4" />
                         Delete node
                     </button>
-                </div>
+                </div>}
             </div>
         </aside>
     )
