@@ -1,5 +1,5 @@
 import { CANVAS_ORIGIN } from '../canvas/layout'
-import { positionsForGraph } from './layout'
+import { layoutForGraph } from './layout'
 import { cloneGraphConfig } from './json'
 import type { CanvasEdge, CanvasNode, Graph, GraphComponentPayload, GraphNode } from './types'
 
@@ -7,16 +7,19 @@ function toConfig(config: GraphNode['config']): Record<string, unknown> {
   return cloneGraphConfig(config)
 }
 
-/** A pure graph adapter: the same stored draft always produces the same canvas. */
+/**
+ * A pure graph adapter: the same stored draft always produces the same canvas,
+ * laid out left to right (stored coordinates are not read, see layoutForGraph).
+ */
 export function toCanvas(
   graph: Graph,
   definitions: Record<string, GraphComponentPayload> = Object.create(null),
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
-  const positions = positionsForGraph(graph)
+  const layout = layoutForGraph(graph, definitions)
   const nodes = (graph.nodes ?? []).map((node): CanvasNode => ({
     id: node.id,
     type: 'nodeflowNode',
-    position: positions[node.id] ?? CANVAS_ORIGIN,
+    position: layout.positions[node.id] ?? CANVAS_ORIGIN,
     data: {
       id: node.id,
       type: node.type,
@@ -26,15 +29,19 @@ export function toCanvas(
     },
   }))
 
-  const edges = (graph.edges ?? []).map((edge, index): CanvasEdge => ({
-    // The index makes even parallel, otherwise-identical draft edges collision-safe.
-    id: `nf${index}-${edge.from}-${edge.output ?? ''}-${edge.to}`,
-    type: 'nodeflowEdge',
-    source: edge.from,
-    sourceHandle: edge.output ?? null,
-    target: edge.to,
-    label: edge.output ?? undefined,
-  }))
+  const edges = (graph.edges ?? []).map((edge, index): CanvasEdge => {
+    const lanes = layout.lanes[index]
+    return {
+      // The index makes even parallel, otherwise-identical draft edges collision-safe.
+      id: `nf${index}-${edge.from}-${edge.output ?? ''}-${edge.to}`,
+      type: 'nodeflowEdge',
+      source: edge.from,
+      sourceHandle: edge.output ?? null,
+      target: edge.to,
+      label: edge.output ?? undefined,
+      ...(lanes === undefined ? {} : { data: { lanes } }),
+    }
+  })
 
   return { nodes, edges }
 }

@@ -75,7 +75,14 @@ export type Graph = { start?: string | null; nodes?: GraphNode[] | null; edges?:
 
 // Source: FlowEditorController::edit(). draft_revision is the concurrency token;
 // draft_updated_at is display metadata only.
-export type FlowSummary = { id:number; name:string; status:string; version:number|null; draft_revision:number; draft_updated_at:string|null }
+export type FlowSummary = {
+  id:number; name:string; status:string; version:number|null; draft_revision:number; draft_updated_at:string|null
+  /** When the live version was published (ISO 8601), and a display name for who did it. */
+  published_at?:string|null
+  published_by?:string|null
+  /** A saved draft differs from the live version. */
+  has_unpublished_changes?:boolean
+}
 export type EditorUrls = {
   draft:string
   publish:string
@@ -96,7 +103,9 @@ export type NodeErrorEntry = { node:string|null; field:string|null; message:stri
 export type PublishErrorBody = { message?:string; errors?:string[]|Record<string,string[]>; node_errors?:NodeErrorEntry[] }
 export type NodeCardData = { id:string; type:string; kind:GraphComponentKind|null; config:Record<string,unknown>; isStart:boolean }
 export type CanvasNode = { id:string; type:'nodeflowNode'; position:{x:number;y:number}; data:NodeCardData }
-export type CanvasEdge = { id:string; type?:'nodeflowEdge'; source:string; sourceHandle:string|null; target:string; label?:string }
+/** A free horizontal band a long edge crosses a column in (see graph/layout.ts): x is the column's left edge. */
+export type CanvasEdgeLane = { x:number; y:number }
+export type CanvasEdge = { id:string; type?:'nodeflowEdge'; source:string; sourceHandle:string|null; target:string; label?:string; data?:{ lanes?:CanvasEdgeLane[] } }
 
 // These graph contracts deliberately do not import xyflow; adapters own that boundary.
 
