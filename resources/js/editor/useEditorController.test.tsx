@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CANVAS_ORIGIN, NODE_MIN_HEIGHT } from '../canvas/layout'
 import type { CanvasActions } from '../canvas/Canvas'
 import type { EditorUrls, Graph, NodeTypePayload, TriggerNodeTypePayload } from '../graph/types'
 import { useEditorController } from './useEditorController'
@@ -105,7 +106,8 @@ describe('useEditorController', () => {
             'filters.status': 'open',
             'b.only': { nested: ['fresh'] },
         }
-        expect(view.result.current.document.nodes[0]).toMatchObject({ position: { x: 31, y: 47 }, data: { config: expected } })
+        const laidOut = view.result.current.document.nodes[0]!.position
+        expect(view.result.current.document.nodes[0]).toMatchObject({ position: laidOut, data: { config: expected } })
         act(() => view.result.current.actions.undo())
         expect(view.result.current.document.nodes[0]?.data.config).toEqual(configuredGraph.nodes?.[0]?.config)
         act(() => view.result.current.actions.redo())
@@ -129,7 +131,8 @@ describe('useEditorController', () => {
         const first = view.result.current.document
         expect(first).toMatchObject({
             startId: 'webhook1',
-            nodes: [{ id: 'webhook1', position: { x: 20, y: 30 }, data: { kind: 'trigger', type: 'custom.webhook', config: { source: 'orders' } } }],
+            // The layout places it, not the drop point: a lone trigger opens the first column.
+            nodes: [{ id: 'webhook1', position: CANVAS_ORIGIN, data: { kind: 'trigger', type: 'custom.webhook', config: { source: 'orders' } } }],
         })
 
         act(() => view.result.current.actions.addTrigger(event, { x: 50, y: 60 }))
@@ -142,7 +145,7 @@ describe('useEditorController', () => {
         act(() => view.result.current.actions.replaceTrigger(event))
         expect(view.result.current.document).toMatchObject({
             startId: 'webhook1',
-            nodes: [{ id: 'webhook1', position: { x: 20, y: 30 }, data: { kind: 'trigger', type: 'custom.event', config: { source: 'order.placed' } } }],
+            nodes: [{ id: 'webhook1', position: CANVAS_ORIGIN, data: { kind: 'trigger', type: 'custom.event', config: { source: 'order.placed' } } }],
         })
         expect(view.result.current.document.nodes.filter((node) => node.data.kind === 'trigger')).toHaveLength(1)
     })
@@ -257,7 +260,7 @@ describe('useEditorController', () => {
         expect(view.result.current.document).toMatchObject({
             startId: 'hook',
             nodes: [
-                { id: 'hook', position: { x: 10, y: 15 }, data: { kind: 'trigger', type: 'custom.event' } },
+                { id: 'hook', position: CANVAS_ORIGIN, data: { kind: 'trigger', type: 'custom.event' } },
                 { id: 'send1', data: { kind: 'executable', type: 'app.send' } },
             ],
             edges: [{ source: 'hook', sourceHandle: 'started', target: 'send1', label: 'started' }],
@@ -366,7 +369,7 @@ describe('useEditorController', () => {
         expect(view.result.current.document.nodes.filter((node) => node.data.kind === 'trigger')).toHaveLength(1)
         expect(view.result.current.document).toMatchObject({
             startId: 'hook',
-            nodes: [{ id: 'hook', position: { x: 10, y: 20 }, data: { type: 'custom.event' } }, { id: 'send1' }],
+            nodes: [{ id: 'hook', position: CANVAS_ORIGIN, data: { type: 'custom.event' } }, { id: 'send1' }],
             edges: [{ source: 'hook', sourceHandle: 'started', target: 'send1' }],
         })
 
@@ -400,7 +403,7 @@ describe('useEditorController', () => {
         expect(replaced).toMatchObject({
             startId: 'active-trigger',
             nodes: [
-                { id: 'active-trigger', position: { x: 40, y: 50 }, data: { type: 'custom.webhook', config: { source: 'orders' } } },
+                { id: 'active-trigger', position: CANVAS_ORIGIN, data: { type: 'custom.webhook', config: { source: 'orders' } } },
                 { id: 'first-target' },
                 { id: 'active-target' },
             ],
@@ -436,7 +439,7 @@ describe('useEditorController', () => {
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
         const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body)) as { graph: Graph }
         expect(body.graph.start).toBe('active-trigger')
-        expect(body.graph.nodes?.find((node) => node.id === 'active-trigger')).toMatchObject({ type: 'custom.webhook', position: { x: 0, y: 100 } })
+        expect(body.graph.nodes?.find((node) => node.id === 'active-trigger')).toMatchObject({ type: 'custom.webhook', position: CANVAS_ORIGIN })
         expect(body.graph.nodes?.map((node) => node.id)).not.toContain('first-trigger')
     })
 
@@ -575,15 +578,17 @@ describe('useEditorController', () => {
     it('adds collision-safe executable nodes without promoting one to graph start', () => {
         const empty = controller({ graph: { start: null, nodes: [], edges: [] } })
         act(() => empty.result.current.actions.addNode(send, { x: 20, y: 30 }))
-        expect(empty.result.current.document).toMatchObject({ startId: '', nodes: [{ id: 'send1', position: { x: 20, y: 30 }, data: { kind: 'executable', isStart: false } }] })
+        expect(empty.result.current.document).toMatchObject({ startId: '', nodes: [{ id: 'send1', position: CANVAS_ORIGIN, data: { kind: 'executable', isStart: false } }] })
         act(() => empty.result.current.actions.addNode(send, { x: 20, y: 30 }))
         expect(empty.result.current.document.nodes.map((node) => node.id)).toEqual(['send1', 'send2'])
-        expect(empty.result.current.document.nodes[1]!.position).not.toEqual({ x: 20, y: 30 })
+        const [first, second] = empty.result.current.document.nodes.map((node) => node.position)
+        // An unconnected node goes below the flow, never on top of another node.
+        expect(second!.y).toBeGreaterThanOrEqual(first!.y + NODE_MIN_HEIGHT)
 
         const populated = controller()
         act(() => populated.result.current.actions.addNode(exit, { x: 500, y: 75 }))
         expect(populated.result.current.document.startId).toBe('send1')
-        expect(populated.result.current.document.nodes.at(-1)).toMatchObject({ position: { x: 500, y: 75 } })
+        expect(populated.result.current.document.nodes.at(-1)!.position.y).toBeGreaterThan(populated.result.current.document.nodes[0]!.position.y)
     })
 
     // Connection gestures without a declared source output must never manufacture a publishable edge.
@@ -612,9 +617,12 @@ describe('useEditorController', () => {
         ]))
         expect(view.result.current.document.nodes[0]!.position).toEqual({ x: 200, y: 30 })
         act(() => view.result.current.actions.undo())
-        expect(view.result.current.document.nodes[0]!.position).toEqual({ x: 0, y: 0 })
+        // Opening lays the graph out; undo returns to that.
+        expect(view.result.current.document.nodes[0]!.position).toEqual(CANVAS_ORIGIN)
         act(() => view.result.current.actions.addAtViewportCenter(exit))
-        expect(view.result.current.document.nodes.at(-1)?.position).toEqual({ x: 321, y: 123 })
+        // Adding is structural: the graph is laid out again, the drag included.
+        expect(view.result.current.document.nodes[0]!.position).toEqual(CANVAS_ORIGIN)
+        expect(canvas.viewportCenter).toHaveBeenCalledOnce()
         expect(view.result.current.canvasProps.deleteKeyCode).toBeNull()
     })
 
@@ -626,7 +634,7 @@ describe('useEditorController', () => {
         act(() => view.result.current.actions.addAtViewportCenter(exit))
 
         expect(screenToFlowPosition).toHaveBeenCalledOnce()
-        expect(view.result.current.document.nodes.at(-1)?.position).toEqual({ x: 777, y: 333 })
+        expect(view.result.current.document.nodes.map((node) => node.id)).toEqual(['send1', 'exit1'])
     })
 
     // Validate has its own endpoint and sequence; it is not a disguised save or publish operation.
@@ -714,9 +722,12 @@ describe('useEditorController', () => {
         act(() => view.result.current.actions.addNode(exit, { x: 300, y: 0 }))
         await act(async () => resolvePublish(Response.json({ version: 4, draft_revision: 8 })))
 
-        expect(view.result.current.toolbarProps.publishedVersion).toBe(3)
+        // The server did publish v4 (the graph sent), so that is the live version,
+        // but the later edit is not in it: the outcome is suppressed and the
+        // draft still counts as unpublished.
+        expect(view.result.current.toolbarProps.publishedVersion).toBe(4)
+        expect(view.result.current.toolbarProps.unpublishedChanges).toBe(true)
         expect(view.result.current.toolbarProps.publish.status).not.toBe('published')
-        expect(view.result.current.noticeProps.publish?.status).not.toBe('published')
     })
 
     it('keeps React Flow select changes out of graph history while projecting node and edge selection', () => {

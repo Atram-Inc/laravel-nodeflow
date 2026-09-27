@@ -8,7 +8,7 @@ const INVALID_BANNER_ERRORS_MESSAGE = 'The publish response contained invalid ba
 const INVALID_WEBHOOK_MESSAGE = 'The publish response contained invalid webhook metadata.'
 
 export type PublishOutcome =
-    | { kind: 'published'; version: number; revision: number; webhookUrl?: string; webhookSecret?: string }
+    | { kind: 'published'; version: number; revision: number; webhookUrl?: string; webhookSecret?: string; publishedAt?: string; publishedBy?: string | null }
     | { kind: 'semantic'; banner: string[]; byNode: Record<string, NodeErrorEntry[]>; unplaceable: string[] }
     | { kind: 'structural'; developer: string[] }
     | { kind: 'failed'; message: string }
@@ -40,10 +40,14 @@ export function interpretPublish(
             return { kind: 'failed', message: INVALID_WEBHOOK_MESSAGE }
         }
 
+        const publishedAt = result.data?.published_at
+        const publishedBy = result.data?.published_by
         return {
             kind: 'published',
             version,
             revision,
+            ...(typeof publishedAt === 'string' && publishedAt !== '' ? { publishedAt } : {}),
+            ...(typeof publishedBy === 'string' && publishedBy !== '' ? { publishedBy } : {}),
             ...(typeof webhookUrl === 'string' ? { webhookUrl } : {}),
             ...(typeof webhookSecret === 'string' ? { webhookSecret } : {}),
         }

@@ -22,6 +22,8 @@ import { EditorToolbar } from './EditorToolbar'
 import { FlowOverview } from './FlowOverview'
 import { NodeInspector } from './NodeInspector'
 import { NodeLibrary } from './NodeLibrary'
+import { PublishToast } from './PublishToast'
+import type { EditorLabels } from './labels'
 import { useEditorController, type ToolbarSlots } from './useEditorController'
 
 type ShortcutEntry = { token: symbol; root: HTMLElement }
@@ -84,6 +86,12 @@ export type FlowEditorProps = {
     toolbarSlots?: ToolbarSlots
     facts?: FactsConfig
     resolveNodeData?: NodeDataResolver
+    /** Inspect only: every field disabled; no library, save, validate, publish, delete or connecting. */
+    readOnly?: boolean
+    /** Translations for the publish, layout and read-only chrome (English by default). */
+    labels?: Partial<EditorLabels>
+    /** What is being edited, in the host's words, shown under the flow name. */
+    context?: string | null
 }
 
 function sessionKey({ flow, urls }: FlowEditorProps): string {
@@ -135,6 +143,7 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
     }, [])
 
     const openLibraryAndFocus = () => {
+        if (controller.readOnly) return
         controller.actions.setInspectorOpen(false)
         controller.actions.setLibraryOpen(true)
         requestAnimationFrame(() => librarySearchRef.current?.focus())
@@ -154,6 +163,7 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
             const targetInside = event.target instanceof Node && root.contains(event.target)
             if (registry.active !== shortcutToken.current || (!targetInside && !root.contains(root.ownerDocument.activeElement))) return
             if (editableTarget(event.target)) return
+            if (controller.readOnly && event.key.toLowerCase() !== 'f') return
             const command = !event.altKey && (event.metaKey || event.ctrlKey)
             const plain = !event.metaKey && !event.ctrlKey && !event.altKey
             if (command && event.key.toLowerCase() === 'z') {
@@ -182,7 +192,7 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
         const document = rootRef.current?.ownerDocument ?? globalThis.document
         document.addEventListener('keydown', onKeyDown)
         return () => document.removeEventListener('keydown', onKeyDown)
-    }, [controller.actions, controller.selected, controller.toolbarProps, controller.view.selectedEdgeId])
+    }, [controller.actions, controller.readOnly, controller.selected, controller.toolbarProps, controller.view.selectedEdgeId])
 
     const triggerTypes = new Set(options.trigger_nodes.map((definition) => definition.type))
     const hasTrigger = controller.document.nodes.some((node) => triggerTypes.has(node.data.type))
@@ -200,7 +210,7 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
     const canvas = <>
         <Canvas {...controller.canvasProps} showMinimap />
         <CanvasHud {...controller.canvasHudProps} />
-        {controller.document.nodes.length === 0 && <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><button type="button" onClick={openLibraryAndFocus} className="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"><NodeflowIcon name="plus" className="size-4" />Add a node</button></div>}
+        {controller.document.nodes.length === 0 && !controller.readOnly && <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><button type="button" onClick={openLibraryAndFocus} className="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"><NodeflowIcon name="plus" className="size-4" />Add a node</button></div>}
     </>
     const dataGraph: Graph = {
         start: controller.document.startId,
@@ -218,8 +228,9 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
             mode={mode}
             className={className}
             toolbar={<EditorToolbar {...controller.toolbarProps} slots={toolbarSlots} />}
-            notices={<EditorNotices {...controller.noticeProps} />}
-            library={library}
+            notices={controller.readOnly ? undefined : <EditorNotices {...controller.noticeProps} />}
+            library={controller.readOnly ? null : library}
+            showLibrary={!controller.readOnly}
             canvas={canvas}
             inspector={inspector}
             libraryOpen={controller.view.libraryOpen}
@@ -227,6 +238,7 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
             onLibraryOpenChange={controller.actions.setLibraryOpen}
             onInspectorOpenChange={controller.actions.setInspectorOpen}
             />
+            <PublishToast {...controller.toastProps} />
         </div>
     </FieldOptionsContext.Provider></FactCataloguesProvider>
 }

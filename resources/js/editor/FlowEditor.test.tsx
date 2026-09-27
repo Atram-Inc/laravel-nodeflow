@@ -6,6 +6,8 @@ import type { CanvasProps } from '../canvas/Canvas'
 import type { FieldControlProps } from '../controls/types'
 import type { Graph, NodeTypePayload, TriggerNodeTypePayload } from '../graph/types'
 import { FlowEditor } from './FlowEditor'
+import { positionsForGraph } from '../graph/layout'
+import { defsByType } from '../graph/toGraph'
 
 const canvasProbe = vi.hoisted(() => ({ current: null as CanvasProps | null }))
 
@@ -124,6 +126,16 @@ const graph: Graph = {
     edges: [{ from: 'send1', to: 'exit1', output: 'sent' }],
 }
 
+/** The graph with the positions the editor lays it out at (stored ones are not read). */
+function laidOut(source: Graph): Graph {
+    const positions = positionsForGraph(source, defsByType([...palette, ...triggerNodes, webhookTrigger, eventTrigger]))
+    return { ...source, nodes: source.nodes!.map((node) => ({ ...node, position: positions[node.id] })) }
+}
+
+function versionSummary(): HTMLElement {
+    return screen.getByTestId('nodeflow-version-summary')
+}
+
 function renderEditor(overrides: Partial<React.ComponentProps<typeof FlowEditor>> = {}) {
     return render(
         <FlowEditor
@@ -236,13 +248,13 @@ describe('FlowEditor', () => {
 
     it('reserves modified F and L shortcuts while accepting only the approved Fit and Auto layout keys', () => {
         const fit = vi.fn()
-        renderEditor({ graph: {
-            ...graph,
-            nodes: [
-                { ...graph.nodes![0]!, position: { x: 999, y: 333 } },
-                { ...graph.nodes![1]!, position: { x: 1_500, y: 333 } },
-            ],
-        } })
+        renderEditor()
+        const opened = canvasProbe.current?.nodes.map((node) => node.position)
+        act(() => canvasProbe.current?.onNodesChange?.([
+            { id: 'send1', type: 'position', position: { x: 999, y: 333 }, dragging: false },
+        ]))
+        const dragged = canvasProbe.current?.nodes.map((node) => node.position)
+        expect(dragged).not.toEqual(opened)
         const callbacks = canvasProbe.current
         if (callbacks?.onReady === undefined) throw new Error('Canvas did not expose its actions callback.')
         act(() => callbacks.onReady?.({ fit, centerNode: vi.fn(), screenToFlowPosition: vi.fn(() => ({ x: 0, y: 0 })) }))
@@ -264,7 +276,7 @@ describe('FlowEditor', () => {
             expect(event.defaultPrevented).toBe(false)
         }
         expect(fit).not.toHaveBeenCalled()
-        expect(canvasProbe.current?.nodes.map((node) => node.position)).toEqual([{ x: 999, y: 333 }, { x: 1_500, y: 333 }])
+        expect(canvasProbe.current?.nodes.map((node) => node.position)).toEqual(dragged)
 
         const fitEvent = new KeyboardEvent('keydown', { key: 'f', cancelable: true })
         act(() => document.dispatchEvent(fitEvent))
@@ -274,7 +286,8 @@ describe('FlowEditor', () => {
         const layoutEvent = new KeyboardEvent('keydown', { key: 'l', shiftKey: true, cancelable: true })
         act(() => document.dispatchEvent(layoutEvent))
         expect(layoutEvent.defaultPrevented).toBe(true)
-        expect(canvasProbe.current?.nodes.map((node) => node.position)).not.toEqual([{ x: 999, y: 333 }, { x: 1_500, y: 333 }])
+        // Tidy puts the dragged node back where the layout wants it.
+        expect(canvasProbe.current?.nodes.map((node) => node.position)).toEqual(opened)
     })
 
     it('keeps the desktop inspector open for overview after genuine pane deselection but respects an explicit collapse', () => {
@@ -426,7 +439,7 @@ describe('FlowEditor', () => {
         )
 
         expect(screen.getByRole('heading', { name: 'Flow Two', level: 1 })).toBeInTheDocument()
-        expect(screen.getByText(/published v5/i)).toBeInTheDocument()
+        expect(versionSummary()).toHaveTextContent('v5')
         expect(screen.getByText(/Start: new1/i)).toBeInTheDocument()
         expect(canvasNode('new1')).toBeInTheDocument()
         expect(screen.getByRole('complementary', { name: 'Flow overview' })).toBeInTheDocument()
@@ -479,14 +492,14 @@ describe('FlowEditor', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Publish' }))
         await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === nextUrls.publish)).toHaveLength(1))
         await act(async () => resolveOld(Response.json({ version: 99, draft_revision: 99 })))
-        expect(screen.queryByText(/Published v99/i)).toBeNull()
-        expect((await screen.findAllByText(/Published v5/i)).length).toBeGreaterThan(0)
+        expect(screen.queryByText(/v99/i)).toBeNull()
+        await waitFor(() => expect(versionSummary()).toHaveTextContent('v5'))
     })
 
     // Published version is durable state; counterfactual reporting draft revision confuses concurrency with releases.
     it('reports the published version and actionable draft autosave failures', async () => {
         const published = renderEditor()
-        expect(screen.getByText(/published v3/i)).toBeInTheDocument()
+        expect(versionSummary()).toHaveTextContent('v3')
         published.unmount()
 
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('draft offline')))
@@ -541,7 +554,8 @@ describe('FlowEditor', () => {
         }, { status: 422 })))
         renderEditor()
         fireEvent.click(screen.getByRole('button', { name: 'Publish' }))
-        expect(await screen.findByText(/editor sent a graph the server could not read/i)).toBeInTheDocument()
+        // Both the notice and the publish toast say so.
+        expect((await screen.findAllByText(/editor sent a graph the server could not read/i)).length).toBeGreaterThan(0)
         expect(screen.getAllByText('graph.nodes.0.id: The graph.nodes.0.id field is required.').length).toBeGreaterThan(0)
     })
 
@@ -591,7 +605,7 @@ describe('FlowEditor', () => {
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
         expect(requestBody(fetchMock, urls.draft)).toMatchObject({
             draft_revision: 20,
-            graph,
+            graph: laidOut(graph),
         })
     })
 
@@ -616,17 +630,17 @@ describe('FlowEditor', () => {
         expect(canvasNode('theirs2')).toBeInTheDocument()
         expect(screen.getByRole('complementary', { name: 'Flow overview' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Publish' }))
-        expect((await screen.findAllByText(/Published v4/)).length).toBeGreaterThan(0)
+        expect(await screen.findByTestId('nodeflow-publish-toast')).toHaveTextContent('Published v4')
         expect(requestBody(fetchMock, urls.publish)).toEqual({
             draft_revision: 20,
-            graph: {
+            graph: laidOut({
                 start: '',
                 nodes: [
-                    { id: 'exit2', type: 'app.send', config: {}, position: { x: 72, y: 88 } },
-                    { id: 'theirs2', type: 'core.exit', config: {}, position: { x: 480, y: 88 } },
+                    { id: 'exit2', type: 'app.send', config: {} },
+                    { id: 'theirs2', type: 'core.exit', config: {} },
                 ],
                 edges: [{ from: 'exit2', to: 'theirs2', output: 'sent' }],
-            },
+            }),
         })
         expect(fetchMock.mock.calls.filter(([url]) => url === urls.draft)).toHaveLength(1)
     })
@@ -647,9 +661,9 @@ describe('FlowEditor', () => {
         expect(fetchMock.mock.calls.filter(([url]) => url === urls.publish)).toHaveLength(0)
         await resolveDraft(Response.json({ draft_revision: 8 }))
         await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === urls.publish)).toHaveLength(1))
-        expect(requestBody(fetchMock, urls.publish).graph).toMatchObject({
-            nodes: expect.arrayContaining([{ id: 'exit2', type: 'core.exit', config: {}, position: { x: 72, y: 296 } }]),
-        })
+        const published = requestBody(fetchMock, urls.publish).graph as Graph
+        expect(published.nodes?.find((node) => node.id === 'exit2')).toMatchObject({ type: 'core.exit', config: {} })
+        expect(published).toEqual(laidOut(published))
         fireEvent.click(screen.getByRole('button', { name: 'Add Exit' }))
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
         expect(requestBody(fetchMock, urls.draft, 1).draft_revision).toBe(30)
@@ -786,7 +800,7 @@ describe('FlowEditor', () => {
             draft_revision: 8,
             graph: {
                 start: '',
-                nodes: [{ id: 'exit1', type: 'core.exit', config: {}, position: { x: 300, y: 0 } }],
+                nodes: [{ id: 'exit1', type: 'core.exit', config: {}, position: { x: 72, y: 88 } }],
                 edges: [],
             },
         })
@@ -823,7 +837,7 @@ describe('FlowEditor', () => {
             draft_revision: 8,
             graph: {
                 start: '',
-                nodes: [{ id: 'exit1', type: 'core.exit', config: {}, position: { x: 300, y: 0 } }],
+                nodes: [{ id: 'exit1', type: 'core.exit', config: {}, position: { x: 72, y: 88 } }],
                 edges: [],
             },
         })
@@ -1240,7 +1254,8 @@ describe('FlowEditor', () => {
         await user.click(await screen.findByRole('button', { name: 'Choose an observed model.' }))
 
         expect(screen.getByRole('complementary', { name: 'Node inspector' })).toHaveTextContent('Webhook')
-        const fieldAlert = screen.getByRole('alert')
+        const inspector = screen.getByRole('complementary', { name: 'Node inspector' })
+        const fieldAlert = within(inspector).getByRole('alert')
         expect(fieldAlert).toHaveTextContent('Choose an observed model.')
         expect(fieldAlert.closest('[data-nodeflow-field-key]')).toHaveAttribute('data-nodeflow-field-key', 'source')
     })
@@ -1317,8 +1332,10 @@ describe('FlowEditor', () => {
         expect(screen.getByLabelText('Webhook endpoint', { selector: 'span' })).toHaveTextContent('https://example.test/hooks/stale-generation')
         expect(screen.getByRole('region', { name: 'Webhook details' })).toHaveTextContent('Active')
         expect(screen.getByText('2026-08-24T12:00:00Z')).toBeInTheDocument()
-        expect(screen.queryByText(/Published v4/i)).toBeNull()
-        expect(screen.getByText(/Published v3/i)).toBeInTheDocument()
+        // v4 is live (the server published the graph it was sent); the edit made
+        // meanwhile is not in it, so the draft still reads as unpublished.
+        expect(versionSummary()).toHaveTextContent('v4')
+        expect(screen.getByTestId('nodeflow-unpublished')).toBeInTheDocument()
     })
 
     it('clears an older one-time secret on a later same-session success even when its generation is stale', async () => {
@@ -1354,8 +1371,8 @@ describe('FlowEditor', () => {
         fireEvent.click(canvasNode('trigger'))
 
         expect(screen.queryByText('older-secret')).toBeNull()
-        expect(screen.queryByText(/Published v5/i)).toBeNull()
-        expect(screen.getByText(/Published v4/i)).toBeInTheDocument()
+        expect(versionSummary()).toHaveTextContent('v5')
+        expect(screen.getByTestId('nodeflow-unpublished')).toBeInTheDocument()
     })
 
     it.each(['switch', 'unmount'] as const)('does not consume a webhook secret after editor %s', async (exit) => {

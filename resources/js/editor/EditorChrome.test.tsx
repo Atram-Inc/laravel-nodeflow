@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { CanvasHud } from './CanvasHud'
 import { EditorNotices, type EditorNoticesProps } from './EditorNotices'
-import { EditorToolbar, type EditorToolbarProps } from './EditorToolbar'
+import { EditorToolbar, PublicationStatus, type EditorToolbarProps } from './EditorToolbar'
+import { defaultEditorLabels, resolveEditorLabels } from './labels'
 
 function toolbar(overrides: Partial<EditorToolbarProps> = {}) {
     const props: EditorToolbarProps = {
@@ -28,13 +29,74 @@ function toolbar(overrides: Partial<EditorToolbarProps> = {}) {
     return { props, ...render(<EditorToolbar {...props} />) }
 }
 
+describe('EditorToolbar publication status', () => {
+    const now = Date.parse('2026-09-27T12:00:00Z')
+
+    it('shows the live version, when and by whom, as text separate from the Publish button', () => {
+        render(<PublicationStatus publication={{ version: 3, publishedAt: '2026-09-27T11:58:00Z', publishedBy: 'Thomas' }} unpublishedChanges={false} labels={defaultEditorLabels} now={now} />)
+
+        expect(screen.getByTestId('nodeflow-version-summary')).toHaveTextContent('v3 · published 2 minutes ago by Thomas')
+        expect(screen.queryByTestId('nodeflow-unpublished')).toBeNull()
+    })
+
+    it('says so when the draft differs from the live version, and when nothing is live yet', () => {
+        const { rerender } = render(<PublicationStatus publication={{ version: 3, publishedAt: '2026-09-27T11:59:40Z', publishedBy: null }} unpublishedChanges labels={defaultEditorLabels} now={now} />)
+        expect(screen.getByTestId('nodeflow-version-summary')).toHaveTextContent('v3 · published just now')
+        expect(screen.getByTestId('nodeflow-unpublished')).toHaveTextContent('Unpublished changes')
+
+        rerender(<PublicationStatus publication={{ version: null, publishedAt: null, publishedBy: null }} unpublishedChanges labels={defaultEditorLabels} now={now} />)
+        expect(screen.getByTestId('nodeflow-version-summary')).toHaveTextContent('Not published')
+        expect(screen.queryByTestId('nodeflow-unpublished')).toBeNull()
+    })
+
+    it('uses host translations and the host locale for relative times', () => {
+        const labels = resolveEditorLabels({
+            locale: 'es',
+            unpublishedChanges: 'Cambios sin publicar',
+            versionSummary: ({ version, when, by }) => `v${version} · publicada ${when} por ${by}`,
+        })
+        render(<PublicationStatus publication={{ version: 2, publishedAt: '2026-09-27T09:00:00Z', publishedBy: 'Ana' }} unpublishedChanges labels={labels} now={now} />)
+
+        expect(screen.getByTestId('nodeflow-version-summary')).toHaveTextContent('v2 · publicada hace 3 horas por Ana')
+        expect(screen.getByTestId('nodeflow-unpublished')).toHaveTextContent('Cambios sin publicar')
+    })
+
+    it('keeps the Publish label while publishing and shows a busy spinner instead', () => {
+        toolbar({ publish: { status: 'publishing' }, labels: resolveEditorLabels({ publish: 'Publicar' }) })
+        const button = screen.getByRole('button', { name: 'Publicar' })
+
+        expect(button).toHaveTextContent(/^Publicar$/)
+        expect(button).toBeDisabled()
+        expect(button).toHaveAttribute('aria-busy', 'true')
+        expect(button.querySelector('svg')).toHaveClass('animate-spin')
+    })
+
+    it('says what is being edited ahead of the trigger', () => {
+        toolbar({ context: 'Default template, applies to new FSPs' })
+
+        expect(screen.getByTestId('nodeflow-editor-context')).toHaveTextContent('Default template, applies to new FSPs·Trigger: Order placed')
+    })
+
+    it('keeps only viewing actions in read-only mode, with a View only badge', () => {
+        toolbar({ readOnly: true, publication: { version: 4, publishedAt: null, publishedBy: null } })
+
+        expect(screen.getByTestId('nodeflow-view-only')).toHaveTextContent('View only')
+        expect(screen.getByTestId('nodeflow-version-summary')).toHaveTextContent('v4')
+        for (const name of ['Publish', 'Validate flow', 'Undo', 'Redo', 'Tidy']) {
+            expect(screen.queryByRole('button', { name })).toBeNull()
+        }
+        expect(screen.queryByRole('status', { name: /Save status/ })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Fit canvas' })).toBeInTheDocument()
+    })
+})
+
 describe('EditorToolbar', () => {
     it('keeps human workflow context and package controls ahead of optional slots', () => {
         toolbar({ slots: { leading: <span>Host back link</span>, trailing: <span>Host help</span> } })
 
         expect(screen.getByRole('heading', { name: 'Welcome shoppers' })).toBeInTheDocument()
         expect(screen.getByText('Trigger: Order placed')).toBeInTheDocument()
-        expect(screen.getByText('Published v7')).toBeInTheDocument()
+        expect(screen.getByTestId('nodeflow-version-summary')).toHaveTextContent('v7')
         expect(screen.getByText('Host back link')).toBeInTheDocument()
         expect(screen.getByText('Host help')).toBeInTheDocument()
         expect(screen.getByRole('status', { name: 'Save status: Saved' })).toBeInTheDocument()
@@ -52,7 +114,7 @@ describe('EditorToolbar', () => {
         rerender(<EditorToolbar {...props} canUndo canRedo hasSelection />)
         await user.click(screen.getByRole('button', { name: 'Undo' }))
         await user.click(screen.getByRole('button', { name: 'Redo' }))
-        await user.click(screen.getByRole('button', { name: 'Auto layout' }))
+        await user.click(screen.getByRole('button', { name: 'Tidy' }))
         await user.click(screen.getByRole('button', { name: 'Fit canvas' }))
         await user.click(screen.getByRole('button', { name: 'Delete selected' }))
         expect(props.onUndo).toHaveBeenCalledOnce()
@@ -88,7 +150,8 @@ describe('EditorToolbar', () => {
         const user = userEvent.setup()
         const { props, rerender } = toolbar({ validation: { status: 'warning', count: 2 }, publish: { status: 'published', version: 8 } })
         expect(screen.getByText('Ready with 2 warnings')).toBeInTheDocument()
-        expect(screen.getByText('Published v8')).toBeInTheDocument()
+        // The button keeps its label; the version is separate text next to it.
+        expect(screen.getByRole('button', { name: 'Publish' })).toHaveTextContent(/^Publish$/)
         await user.click(screen.getByRole('button', { name: 'Validate flow' }))
         await user.click(screen.getByRole('button', { name: 'Publish' }))
         expect(props.onValidate).toHaveBeenCalledOnce()
@@ -117,7 +180,7 @@ describe('EditorToolbar', () => {
     it('keeps secondary actions in a named narrow overflow without duplicating primary actions', () => {
         toolbar()
         const overflow = screen.getByRole('group', { name: 'More workflow actions' })
-        expect(within(overflow).getByRole('button', { name: 'Auto layout (more actions)' })).toBeInTheDocument()
+        expect(within(overflow).getByRole('button', { name: 'Tidy (more actions)' })).toBeInTheDocument()
         expect(within(overflow).getByRole('button', { name: 'Fit canvas (more actions)' })).toBeInTheDocument()
         expect(within(overflow).getByRole('button', { name: 'Undo (more actions)' })).toBeInTheDocument()
         expect(within(overflow).getByRole('button', { name: 'Redo (more actions)' })).toBeInTheDocument()
@@ -145,7 +208,7 @@ describe('EditorToolbar overflow menu', () => {
         const user = userEvent.setup()
         const { props } = toolbar()
         const details = openMenu()
-        await user.click(within(details).getByRole('button', { name: 'Auto layout (more actions)' }))
+        await user.click(within(details).getByRole('button', { name: 'Tidy (more actions)' }))
         expect(props.onAutoLayout).toHaveBeenCalledOnce()
         expect(details.open).toBe(false)
     })
@@ -185,13 +248,12 @@ describe('EditorNotices and CanvasHud', () => {
             save={{ status: 'conflict', message: 'A newer revision exists.' }}
             structuralError="The editor could not build this graph."
             graphMessages={['Start node is required', 'The node legacy is unplaceable']}
-            publish={{ status: 'error', message: 'Publish failed.' }}
             validation={{ status: 'failed' }}
             validationMessage="Validation service unavailable."
             onKeepMine={keepMine}
             onUseTheirs={useTheirs}
         />)
-        expect(screen.getAllByRole('alert')).toHaveLength(5)
+        expect(screen.getAllByRole('alert')).toHaveLength(4)
         expect(screen.getByText('Start node is required')).toBeInTheDocument()
         expect(screen.getByText('The node legacy is unplaceable')).toBeInTheDocument()
         await user.click(screen.getByRole('button', { name: 'Keep mine' }))
@@ -200,12 +262,14 @@ describe('EditorNotices and CanvasHud', () => {
         expect(useTheirs).toHaveBeenCalledOnce()
     })
 
-    it('does not duplicate routine saved feedback as a notice and reports published success as status', () => {
+    it('does not duplicate routine saved feedback or publish outcomes (the publish toast answers those)', () => {
         const callbacks = { onKeepMine: vi.fn(), onUseTheirs: vi.fn() }
         const { rerender } = render(<EditorNotices save={{ status: 'saved' }} {...callbacks} />)
         expect(screen.queryByRole('alert')).toBeNull()
         rerender(<EditorNotices save={{ status: 'idle' }} publish={{ status: 'published', version: 4 }} {...callbacks} />)
-        expect(screen.getByRole('status')).toHaveTextContent('Published v4')
+        expect(screen.queryByRole('status')).toBeNull()
+        rerender(<EditorNotices save={{ status: 'idle' }} publish={{ status: 'error', message: 'Publish failed.' }} {...callbacks} />)
+        expect(screen.queryByRole('alert')).toBeNull()
     })
 
     it('shows count grammar and readiness without taking canvas pointer events', () => {
