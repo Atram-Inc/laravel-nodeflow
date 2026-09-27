@@ -1007,3 +1007,47 @@ it('resolves editor urls through host domain parameters', function () {
         ->assertJsonPath('props.urls.rotate_webhook_secret', "http://acme.example.test/admin/flows/{$this->flow->id}/webhook-secret/rotate")
         ->assertJsonPath('props.urls.trigger_options', "http://acme.example.test/admin/flows/{$this->flow->id}/trigger-nodes/__NODEFLOW_TYPE__/fields/__NODEFLOW_FIELD__/options");
 });
+
+it('tells the editor when and by whom the live version was published, and whether a draft is pending', function () {
+    // The toolbar shows "v1 · published 2 minutes ago by Ada" and an
+    // "Unpublished changes" state. Counterfactual: drop the draft check and an
+    // author leaves thinking an unpublished edit is live.
+    allowEverything();
+    Nodeflow::describePublishersUsing(fn (string $id): ?string => $id === (string) $this->user->getAuthIdentifier() ? 'Ada' : null);
+
+    try {
+        $this->actingAs($this->user)
+            ->postJson("/nodeflow/flows/{$this->flow->id}/publish", ['graph' => exitGraph(), 'draft_revision' => 0])
+            ->assertOk()
+            ->assertJsonPath('version', 1)
+            ->assertJsonPath('published_by', 'Ada')
+            ->assertJson(fn ($json) => $json->whereType('published_at', 'string')->etc());
+
+        editPage($this, $this->flow->id)
+            ->assertOk()
+            ->assertJsonPath('props.flow.version', 1)
+            ->assertJsonPath('props.flow.published_by', 'Ada')
+            ->assertJsonPath('props.flow.has_unpublished_changes', false)
+            ->assertJson(fn ($json) => $json->whereType('props.flow.published_at', 'string')->etc());
+
+        app(SaveDraft::class)->save($this->flow->fresh(), exitGraph(), (int) $this->flow->fresh()->draft_revision);
+
+        editPage($this, $this->flow->id)
+            ->assertJsonPath('props.flow.has_unpublished_changes', true);
+    } finally {
+        Nodeflow::describePublishersUsing(null);
+    }
+});
+
+it('names no publisher when the host has not taught it how', function () {
+    allowEverything();
+
+    $this->actingAs($this->user)
+        ->postJson("/nodeflow/flows/{$this->flow->id}/publish", ['graph' => exitGraph(), 'draft_revision' => 0])
+        ->assertOk()
+        ->assertJsonPath('published_by', null);
+
+    editPage($this, $this->flow->id)
+        ->assertJsonPath('props.flow.published_by', null)
+        ->assertJsonPath('props.flow.has_unpublished_changes', false);
+});

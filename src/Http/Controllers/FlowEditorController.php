@@ -13,6 +13,7 @@ use Nodeflow\Graph\Graph;
 use Nodeflow\Graph\GraphValidator;
 use Nodeflow\Http\ResolvesRouteNames;
 use Nodeflow\Models\Flow;
+use Nodeflow\Nodeflow;
 use Nodeflow\Nodes\NodeRegistry;
 use Nodeflow\Publishing\GraphInvalidException;
 use Nodeflow\Publishing\PublishFlow;
@@ -65,13 +66,19 @@ class FlowEditorController extends Controller
         $endpoint = $flow->webhookEndpoint()->first();
         $activation = $flow->triggerActivation()->first();
         $definitions = new TriggerDefinitionContext;
+        $current = $flow->currentVersion;
 
         return Inertia::render('nodeflow/editor', [
             'flow' => [
                 'id' => $flow->id,
                 'name' => $flow->name,
                 'status' => $flow->status,
-                'version' => $flow->currentVersion?->version,
+                'version' => $current?->version,
+                // Shown next to Publish: "v3 · published 2 minutes ago by Thomas".
+                'published_at' => $current?->published_at?->toIso8601String(),
+                'published_by' => Nodeflow::publisherName($current?->published_by),
+                // Publishing clears the draft, so a stored draft is work that is not live.
+                'has_unpublished_changes' => $flow->draft_graph !== null,
                 'draft_revision' => $flow->draft_revision,
                 // Not the concurrency token — see draft_revision above — but real
                 // and worth showing an author as "last saved 3 minutes ago".
@@ -280,6 +287,8 @@ class FlowEditorController extends Controller
         $response = [
             'version' => $result->version->version,
             'draft_revision' => (int) ($flow->draft_revision ?? 0),
+            'published_at' => $result->version->published_at?->toIso8601String(),
+            'published_by' => Nodeflow::publisherName($result->version->published_by),
         ];
 
         if ($result->webhookUrl !== null) {

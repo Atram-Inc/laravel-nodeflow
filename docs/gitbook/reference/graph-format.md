@@ -36,7 +36,7 @@ This example assumes the host registered webhook source `shop.order_webhook`:
 }
 ```
 
-`position` is editor layout data, not runtime behavior. Stored finite positions win on hydration, and topology placement fills only missing positions. Auto layout is the only action that repositions every node. Additional JSON properties normally round-trip semantically, but Nodeflow does not promise byte-for-byte or object-versus-empty-array preservation.
+`position` is editor layout data, not runtime behavior. The editor saves the positions it shows, but it lays every graph out again when it opens (see Automatic layout in the editor guide), so stored positions do not decide where nodes appear. Additional JSON properties normally round-trip semantically, but Nodeflow does not promise byte-for-byte or object-versus-empty-array preservation.
 
 ## Shape
 

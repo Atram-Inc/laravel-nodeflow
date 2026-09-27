@@ -11,6 +11,33 @@ use Nodeflow\Triggers\TriggerSourceRegistry;
 
 class Nodeflow
 {
+    /** @var (callable(string): ?string)|null */
+    private static $publisherNames = null;
+
+    /**
+     * Teach the editor how to name the person who published a version.
+     * `published_by` stores the publisher's auth identifier; the editor shows
+     * "published 2 minutes ago by <name>" when the resolver returns one.
+     *
+     * @param  (callable(string): ?string)|null  $resolver
+     */
+    public static function describePublishersUsing(?callable $resolver): void
+    {
+        static::$publisherNames = $resolver;
+    }
+
+    /** The display name for a `published_by` value, or null when unknown. */
+    public static function publisherName(?string $publishedBy): ?string
+    {
+        if ($publishedBy === null || $publishedBy === '' || static::$publisherNames === null) {
+            return null;
+        }
+
+        $name = (static::$publisherNames)($publishedBy);
+
+        return is_string($name) && $name !== '' ? $name : null;
+    }
+
     public static function nodes(): NodeRegistry
     {
         return app(NodeRegistry::class);
