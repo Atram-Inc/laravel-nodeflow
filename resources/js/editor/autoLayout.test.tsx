@@ -141,6 +141,17 @@ describe('publish feedback', () => {
 
         act(() => view.result.current.actions.configure('yes', 'template', 'Evacuate'))
         expect(view.result.current.toolbarProps.unpublishedChanges).toBe(true)
+        // Undoing back to what is live is not an unpublished change.
+        act(() => view.result.current.actions.undo())
+        expect(view.result.current.toolbarProps.unpublishedChanges).toBe(false)
+    })
+
+    it('does not count a drag or a Tidy as an unpublished change', () => {
+        const view = controller()
+        act(() => view.result.current.actions.nodesChange([{ id: 'yes', type: 'position', position: { x: 2000, y: 2000 }, dragging: false }]))
+        expect(view.result.current.toolbarProps.unpublishedChanges).toBe(false)
+        act(() => view.result.current.actions.autoLayout())
+        expect(view.result.current.toolbarProps.unpublishedChanges).toBe(false)
     })
 
     it('answers a refused publish with an error toast that gives the reason', async () => {
@@ -172,6 +183,19 @@ describe('publish feedback', () => {
     })
 })
 
+describe('growing cards', () => {
+    it('lays out again, without an undo step, when a card grows past its reserved height', async () => {
+        const view = controller()
+        const before = positions(view)
+
+        act(() => view.result.current.actions.nodesChange([{ id: 'yes', type: 'dimensions', dimensions: { width: 256, height: 600 } }]))
+
+        await waitFor(() => expect(positions(view).no!.y).toBeGreaterThanOrEqual(positions(view).yes!.y + 600))
+        expect(positions(view).no).not.toEqual(before.no)
+        expect(view.result.current.toolbarProps.canUndo).toBe(false)
+    })
+})
+
 describe('read-only mode', () => {
     it('refuses every change, never saves and never publishes', async () => {
         const fetchMock = vi.fn(async () => Response.json({ draft_revision: 8 }))
@@ -193,6 +217,17 @@ describe('read-only mode', () => {
         expect(view.result.current.canvasProps.interactive).toBe(false)
         expect(view.result.current.canvasProps.onConnect).toBeUndefined()
         expect(view.result.current.canvasProps.onDropNodeType).toBeUndefined()
+    })
+
+    it('never saves, even when the layout corrects itself for a grown card', async () => {
+        const fetchMock = vi.fn(async () => Response.json({ draft_revision: 8 }))
+        vi.stubGlobal('fetch', fetchMock)
+        const view = controller({ readOnly: true })
+
+        act(() => view.result.current.actions.nodesChange([{ id: 'yes', type: 'dimensions', dimensions: { width: 256, height: 600 } }]))
+        await new Promise((resolve) => setTimeout(resolve, 30))
+
+        expect(fetchMock).not.toHaveBeenCalled()
     })
 
     it('shows the same canvas and forms, every field disabled, with a View only badge and no editing chrome', () => {

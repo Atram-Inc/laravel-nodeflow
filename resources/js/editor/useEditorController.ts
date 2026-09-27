@@ -8,7 +8,7 @@ import {
 } from '@xyflow/react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CanvasActions, CanvasProps, NodeflowEdge, NodeflowNode } from '../canvas/Canvas'
-import { CANVAS_ORIGIN } from '../canvas/layout'
+import { CANVAS_ORIGIN, estimatedNodeHeight } from '../canvas/layout'
 import type { NodeRendererMap } from '../canvas/context'
 import { mergeControls, type ControlMap } from '../controls'
 import { toCanvas } from '../graph/toCanvas'
@@ -189,6 +189,15 @@ function stripEdgeSelection(edges: NodeflowEdge[]): NodeflowEdge[] {
 type Measured = { width: number; height: number }
 type CanvasNodeEntry = { source: NodeflowNode; selected: boolean; isStart: boolean; node: NodeflowNode }
 type CanvasEdgeEntry = { source: NodeflowEdge; selected: boolean; edge: NodeflowEdge }
+
+/** What a graph does, without canvas positions. */
+function semanticKey(graph: Graph): string {
+    return JSON.stringify({
+        start: graph.start ?? '',
+        nodes: (graph.nodes ?? []).map((node) => ({ id: node.id, type: node.type, config: node.config ?? {} })),
+        edges: graph.edges ?? [],
+    })
+}
 
 function sameLanes(left: unknown, right: Array<{ x: number; y: number }> | undefined): boolean {
     return JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
@@ -435,7 +444,6 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         publishedBy: options.flow.published_by ?? null,
     })
     const publishedVersion = publication.version
-    const [unpublishedChanges, setUnpublishedChanges] = useState(options.flow.has_unpublished_changes === true)
     const [toast, setToast] = useState<PublishToastState>(null)
     const toastSequence = useRef(0)
     const showToast = useCallback((next: { kind: 'success'; version: number } | { kind: 'error'; reason: string }) => {
@@ -468,6 +476,8 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     const rotationUrl = useRef(options.urls.rotate_webhook_secret)
     const canvas = useRef<CanvasActions | null>(null)
     const measuredRef = useRef(new Map<string, Measured>())
+    /** Measured sizes the last layout used (heights the layout reserved). */
+    const reservedRef = useRef(new Map<string, Measured>())
     const canvasNodeCache = useRef(new Map<string, CanvasNodeEntry>())
     const canvasEdgeCache = useRef(new Map<string, CanvasEdgeEntry>())
     const optionsCache = useRef(new Map<string, Record<string, string>>())
@@ -476,7 +486,15 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     const built = useMemo(() => toGraph(document, document.startId, defs), [document, defs])
     const builtRef = useRef(built)
     builtRef.current = built
-    const autosave = useAutosave({ url: options.urls.draft, sessionIdentity: options.urls.publish, initialRevision: options.flow.draft_revision, graph: built.graph, debounceMs: options.autosaveDebounceMs })
+    // A read-only session never saves: autosave only ever sees the graph it opened with.
+    const openedGraph = useRef(built.graph)
+    const autosave = useAutosave({ url: options.urls.draft, sessionIdentity: options.urls.publish, initialRevision: options.flow.draft_revision, graph: readOnly ? openedGraph.current : built.graph, debounceMs: options.autosaveDebounceMs })
+    // "Unpublished changes" compares what the graph does (positions left out) with
+    // the live version: an edit undone, or a Tidy, is not an unpublished change.
+    const currentSemantic = useMemo(() => semanticKey(built.graph), [built])
+    const openedSemantic = useRef(currentSemantic)
+    const [publishedBaseline, setPublishedBaseline] = useState<string | null>(() => options.flow.has_unpublished_changes === true ? null : openedSemantic.current)
+    const unpublishedChanges = publishedBaseline === null || publishedBaseline !== currentSemantic
     const applyPendingWebhookMetadata = useCallback(() => {
         const pending = pendingWebhookMetadata.current
         pendingWebhookMetadata.current = null
@@ -565,14 +583,47 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         generation.current += 1
         clearValidation()
         setPublishOutcome(null)
-        setUnpublishedChanges(true)
         return true
     }, [clearValidation])
 
     /** Adding or removing a node or a connection re-lays the whole graph out. */
-    const commitLaidOut = useCallback((next: EditorDocument, transaction: string | null = null) => (
-        commit(laidOutDocument(next, defs, measuredRef.current), transaction)
-    ), [commit, defs])
+    const commitLaidOut = useCallback((next: EditorDocument, transaction: string | null = null) => {
+        reservedRef.current = new Map(measuredRef.current)
+        return commit(laidOutDocument(next, defs, measuredRef.current), transaction)
+    }, [commit, defs])
+
+    /** The height the last layout kept for a node: its estimate, or what was measured then. */
+    const reservedHeight = useCallback((id: string) => {
+        const type = documentRef.current.nodes.find((node) => node.id === id)?.data.type
+        const outputs = type !== undefined && Object.prototype.hasOwnProperty.call(defs, type) ? defs[type]!.outputs?.length ?? 0 : 0
+        return Math.max(estimatedNodeHeight(outputs), reservedRef.current.get(id)?.height ?? 0)
+    }, [defs])
+
+    /**
+     * A card grew taller than its reserved space (errors appeared, a host body
+     * expanded): lay out again in place, so neighbours never overlap. It is a
+     * view correction, not an author's edit, so it adds no undo step.
+     */
+    const relayoutFrame = useRef<number | null>(null)
+    const scheduleRelayout = useCallback(() => {
+        if (relayoutFrame.current !== null || typeof requestAnimationFrame === 'undefined') return
+        relayoutFrame.current = requestAnimationFrame(() => {
+            relayoutFrame.current = null
+            if (!mounted.current) return
+            const current = historyRef.current
+            reservedRef.current = new Map(measuredRef.current)
+            const next = laidOutDocument(current.present, defs, measuredRef.current)
+            if (sameDocument(next, current.present)) return
+            const snapshot = snapshotDocument(next, current.present)
+            const replaced = { ...current, present: snapshot }
+            historyRef.current = replaced
+            documentRef.current = snapshot
+            setHistory(replaced)
+        })
+    }, [defs])
+    useEffect(() => () => {
+        if (relayoutFrame.current !== null) cancelAnimationFrame(relayoutFrame.current)
+    }, [])
 
     const closeConfigTransaction = useCallback(() => {
         const next = closeTransaction(historyRef.current)
@@ -711,9 +762,13 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         // Measured size is React Flow's view state. It is remembered so a node
         // object rebuilt later still carries it, but it never becomes a graph
         // edit, a history entry or an autosave.
+        let grew = false
         for (const change of graphChanges) {
-            if (change.type === 'dimensions' && change.dimensions !== undefined) measuredRef.current.set(change.id, { width: change.dimensions.width, height: change.dimensions.height })
+            if (change.type !== 'dimensions' || change.dimensions === undefined) continue
+            measuredRef.current.set(change.id, { width: change.dimensions.width, height: change.dimensions.height })
+            if (change.dimensions.height > reservedHeight(change.id) + 1) grew = true
         }
+        if (grew) scheduleRelayout()
         const removed = new Set(graphChanges.filter((change) => change.type === 'remove').map((change) => change.id))
         if (graphChanges.every((change) => change.type === 'dimensions')) return
         const current = documentRef.current
@@ -727,7 +782,7 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         else commit(nextDocument, transaction)
         if (position?.type === 'position' && position.dragging === false) closeConfigTransaction()
         if (removed.size > 0) setSelected((selection) => removed.has(selection.nodeId ?? '') || current.edges.some((edge) => edge.id === selection.edgeId && (removed.has(edge.source) || removed.has(edge.target))) ? { nodeId: null, edgeId: null } : selection)
-    }, [closeConfigTransaction, commit, commitLaidOut, defs, selectNode])
+    }, [closeConfigTransaction, commit, commitLaidOut, defs, reservedHeight, scheduleRelayout, selectNode])
 
     const edgesChange = useCallback((changes: EdgeChange<NodeflowEdge>[]) => {
         const selectionChanges = changes.filter((change) => change.type === 'select')
@@ -837,7 +892,6 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         generation.current += 1
         clearValidation()
         setPublishOutcome(null)
-        setUnpublishedChanges(true)
         setSelected((selection) => ({ nodeId: next.present.nodes.some((node) => node.id === selection.nodeId) ? selection.nodeId : null, edgeId: next.present.edges.some((edge) => edge.id === selection.edgeId) ? selection.edgeId : null }))
     }, [clearValidation])
 
@@ -870,7 +924,6 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         generation.current += 1
         clearValidation()
         setPublishOutcome(null)
-        setUnpublishedChanges(true)
         setSelected({ nodeId: null, edgeId: null })
         setView((current) => ({ ...current, selectedEdgeId: null }))
         autosave.resolveConflict('theirs', toGraph(next, next.startId, defs).graph)
@@ -999,12 +1052,13 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
                 }
             }
             if (next.kind === 'published') {
+                // What is live now is the graph this request sent; later edits stay unpublished.
+                setPublishedBaseline(semanticKey(currentBuilt.graph))
                 setPublication({ version: next.version, publishedAt: next.publishedAt ?? new Date().toISOString(), publishedBy: next.publishedBy ?? null })
                 showToast({ kind: 'success', version: next.version })
             }
             if (publishedGeneration !== generation.current) return
-            if (next.kind === 'published') setUnpublishedChanges(false)
-            else showToast({ kind: 'error', reason: publishFailureReason(next, labels) })
+            if (next.kind !== 'published') showToast({ kind: 'error', reason: publishFailureReason(next, labels) })
             setPublishOutcome(next.kind === 'published'
                 ? { kind: 'published', version: next.version, revision: next.revision }
                 : next)
@@ -1024,6 +1078,7 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
             }
         }
     }, [applyPendingWebhookMetadata, autosave, defs, labels, options.urls.publish, showToast])
+
 
     const rotateWebhookSecret = useCallback(async () => {
         if (!mounted.current || activeRotation.current !== null || activeCredentialOperation.current !== null) return

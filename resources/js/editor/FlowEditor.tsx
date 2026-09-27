@@ -94,8 +94,9 @@ export type FlowEditorProps = {
     context?: string | null
 }
 
-function sessionKey({ flow, urls }: FlowEditorProps): string {
-    return JSON.stringify([flow.id, urls.draft, urls.publish, flow.draft_revision, flow.version])
+function sessionKey({ flow, urls, readOnly }: FlowEditorProps): string {
+    // Switching read-only mode starts a fresh session, so no queued autosave survives it.
+    return JSON.stringify([flow.id, urls.draft, urls.publish, flow.draft_revision, flow.version, readOnly === true])
 }
 
 /** The public session boundary remounts all request and history refs when server identity changes. */
