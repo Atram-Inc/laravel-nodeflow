@@ -23,7 +23,7 @@ import { FlowOverview } from './FlowOverview'
 import { NodeInspector } from './NodeInspector'
 import { NodeLibrary } from './NodeLibrary'
 import { PublishToast } from './PublishToast'
-import type { EditorLabels } from './labels'
+import { resolveEditorLabels, type EditorLabels } from './labels'
 import { useEditorController, type ToolbarSlots } from './useEditorController'
 
 type ShortcutEntry = { token: symbol; root: HTMLElement }
@@ -208,9 +208,16 @@ function FlowEditorSession({ mode = 'workspace', toolbarSlots, className, facts,
         onRequestClose={() => controller.actions.setLibraryOpen(false)}
         searchInputRef={librarySearchRef}
     />
+    const labels = resolveEditorLabels(options.labels)
     const canvas = <>
         <Canvas {...controller.canvasProps} showMinimap />
         <CanvasHud {...controller.canvasHudProps} />
+        {!controller.readOnly && controller.view.selectedEdgeId !== null && <div className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
+            <button type="button" onClick={controller.actions.deleteSelection} className="inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-md border border-destructive/30 bg-card px-3 text-sm text-destructive shadow-md hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <NodeflowIcon name="trash" className="size-4" />
+                {labels.deleteConnection}
+            </button>
+        </div>}
         {controller.document.nodes.length === 0 && !controller.readOnly && <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><button type="button" onClick={openLibraryAndFocus} className="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"><NodeflowIcon name="plus" className="size-4" />Add a node</button></div>}
     </>
     const dataGraph: Graph = {
