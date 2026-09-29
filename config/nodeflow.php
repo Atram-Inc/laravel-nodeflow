@@ -1,6 +1,19 @@
 <?php
 
+use Nodeflow\Nodes\Core\ConditionNode;
+use Nodeflow\Nodes\Core\ExitNode;
+use Nodeflow\Nodes\Core\FactConditionNode;
+use Nodeflow\Nodes\Core\StartFlowNode;
+use Nodeflow\Nodes\Core\WaitNode;
+
 return [
+    'core_nodes' => [
+        ExitNode::class,
+        FactConditionNode::class,
+        WaitNode::class,
+        ConditionNode::class,
+        StartFlowNode::class,
+    ],
     'tables' => ['prefix' => 'nodeflow_'],
     'retention' => ['runs_days' => 90, 'node_executions_days' => 90],
     'limits' => [
