@@ -1,6 +1,6 @@
 # Configuration reference
 
-Nodeflow ships six top-level entries: four nested groups and two scalar settings. Together they contain thirteen leaf keys. Publish an application-owned copy only when you need to change a value, then rebuild Laravel's configuration cache.
+Nodeflow ships seven top-level entries: four nested groups, one node-class list and two scalar settings. Together they contain fourteen leaf keys. Publish an application-owned copy only when you need to change a value, then rebuild Laravel's configuration cache.
 
 ```bash
 php artisan vendor:publish --tag=nodeflow-config
@@ -12,6 +12,7 @@ php artisan config:cache
 
 | Path | Default | Accepted value | Environment value | Runtime effect and when to change it |
 | --- | --- | --- | --- | --- |
+| `nodeflow.core_nodes` | Exit, Fact Condition, Wait, Condition, Start Flow | Array of executable node class names; an empty array registers no built-in nodes. | None | Replaces the built-in node list during boot. Omitted types cannot be edited, published or executed unless the host registers them separately. Host-registered nodes and triggers are unaffected. Older caches without this key retain the default list; an explicit empty list is respected. |
 | `nodeflow.tables.prefix` | `'nodeflow_'` | **No current runtime contract.** The runtime does not read or validate this key. | None | **Currently configuration-only.** Shipped migrations and SQL use literal `nodeflow_*` names, so changing the value does not rename tables. |
 | `nodeflow.retention.runs_days` | `90` | Any value; `nodeflow:prune` casts the selected value to `int`. | None | Default age in calendar days for pruning terminal runs when `--days` is omitted or falsey. Preview unusual values with `--dry-run`. |
 | `nodeflow.retention.node_executions_days` | `90` | Any value; not independently validated. | None | **Currently configuration-only.** Node executions are deleted with their selected parent runs; this key is not read as an independent retention window. |

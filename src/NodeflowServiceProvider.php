@@ -26,11 +26,6 @@ use Nodeflow\Facts\Publishing\CompileFacts;
 use Nodeflow\Graph\GraphTypeCatalog;
 use Nodeflow\Models\Flow;
 use Nodeflow\Models\Run;
-use Nodeflow\Nodes\Core\ConditionNode;
-use Nodeflow\Nodes\Core\ExitNode;
-use Nodeflow\Nodes\Core\FactConditionNode;
-use Nodeflow\Nodes\Core\StartFlowNode;
-use Nodeflow\Nodes\Core\WaitNode;
 use Nodeflow\Nodes\NodeRegistry;
 use Nodeflow\Policies\FlowPolicy;
 use Nodeflow\Policies\RunPolicy;
@@ -147,13 +142,7 @@ class NodeflowServiceProvider extends ServiceProvider
 
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
-        Nodeflow::register([
-            ExitNode::class,
-            FactConditionNode::class,
-            WaitNode::class,
-            ConditionNode::class,
-            StartFlowNode::class,
-        ]);
+        Nodeflow::register(config('nodeflow.core_nodes', (require __DIR__.'/../config/nodeflow.php')['core_nodes']));
 
         // Host providers register custom components in their boot() methods.
         // Resolve health only after every provider has booted, regardless of
