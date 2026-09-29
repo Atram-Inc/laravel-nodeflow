@@ -1246,7 +1246,7 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
     return {
         document,
         selected: selectedNode,
-        view,
+        view: { ...view, selectedEdgeId: selected.edgeId },
         actions,
         optionsSource,
         canvasProps: { nodes: canvasNodes, edges: canvasEdges, defs, renderers: options.nodeRenderers, nodeErrors, onNodesChange: readOnly ? undefined : nodesChange, onEdgesChange: readOnly ? undefined : edgesChange, onConnect: readOnly ? undefined : connect, onNodeClick: selectNode, onEdgeClick: readOnly ? undefined : selectEdge, onPaneClick: () => { selectNode(null) }, onDropNodeType: readOnly ? undefined : (type, point) => { const definition = Object.prototype.hasOwnProperty.call(defs, type) ? defs[type] : undefined; if (definition?.kind === 'executable') addNode(definition, point); else if (definition?.kind === 'trigger') addTrigger(definition, point) }, onReady: (next) => { canvas.current = next }, onDispose: (old) => { if (canvas.current === old) canvas.current = null }, interactive: !readOnly, deleteKeyCode: null },

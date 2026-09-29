@@ -1657,3 +1657,14 @@ it('does not offer connection deletion in read-only mode', () => {
     expect(canvasProbe.current!.onEdgeClick).toBeUndefined()
     expect(screen.queryByRole('button', { name: 'Delete connection' })).toBeNull()
 })
+
+it('clears the connection action when adding a node after selecting a line', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    act(() => canvasProbe.current!.onEdgeClick!(canvasProbe.current!.edges[0]!.id))
+    expect(screen.getByRole('button', { name: 'Delete connection' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add Send message' }))
+    expect(canvasProbe.current!.nodes).toHaveLength(3)
+    expect(canvasProbe.current!.edges).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Delete connection' })).toBeNull()
+})
