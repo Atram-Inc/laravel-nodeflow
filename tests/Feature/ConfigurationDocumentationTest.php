@@ -1,5 +1,11 @@
 <?php
 
+use Nodeflow\Nodes\Core\ConditionNode;
+use Nodeflow\Nodes\Core\ExitNode;
+use Nodeflow\Nodes\Core\FactConditionNode;
+use Nodeflow\Nodes\Core\StartFlowNode;
+use Nodeflow\Nodes\Core\WaitNode;
+
 function flattenNodeflowConfiguration(array $values, string $prefix = ''): array
 {
     $flattened = [];
@@ -7,7 +13,7 @@ function flattenNodeflowConfiguration(array $values, string $prefix = ''): array
     foreach ($values as $key => $value) {
         $path = ltrim($prefix.'.'.$key, '.');
 
-        if (is_array($value)) {
+        if (is_array($value) && ! array_is_list($value)) {
             $flattened += flattenNodeflowConfiguration($value, $path);
         } else {
             $flattened[$path] = $value;
@@ -21,6 +27,13 @@ it('keeps the configuration reference synchronized with every shipped key and de
     $root = dirname(__DIR__, 2);
     $configuration = require $root.'/config/nodeflow.php';
     $expected = [
+        'core_nodes' => [
+            ExitNode::class,
+            FactConditionNode::class,
+            WaitNode::class,
+            ConditionNode::class,
+            StartFlowNode::class,
+        ],
         'tables.prefix' => 'nodeflow_',
         'retention.runs_days' => 90,
         'retention.node_executions_days' => 90,
@@ -37,6 +50,7 @@ it('keeps the configuration reference synchronized with every shipped key and de
     ];
 
     expect(array_keys($configuration))->toBe([
+        'core_nodes',
         'tables',
         'retention',
         'limits',
@@ -58,6 +72,7 @@ it('keeps the configuration reference synchronized with every shipped key and de
 
     expect(array_keys($documented))->toBe(array_keys($expected))
         ->and(array_column($documented, 'default', null))->toBe([
+            'Exit, Fact Condition, Wait, Condition, Start Flow',
             "`'nodeflow_'`",
             '`90`',
             '`90`',
@@ -74,9 +89,9 @@ it('keeps the configuration reference synchronized with every shipped key and de
         ])
         ->and($documented['tenancy']['environment'])->toBe('`NODEFLOW_TENANCY`')
         ->and(collect($documented)->except('tenancy')->pluck('environment')->unique()->all())->toBe(['None'])
-        ->and($docs)->toContain('six top-level entries')
+        ->and($docs)->toContain('seven top-level entries')
         ->toContain('four nested groups')
-        ->toContain('thirteen leaf keys')
+        ->toContain('fourteen leaf keys')
         ->toContain('fixed-size ownership and insertion batches')
         ->toContain('positive integer or a digit-only positive integer string')
         ->toContain('Numeric strings are rejected')
