@@ -18,6 +18,7 @@ export type ExecutableNodeTypePayload = {
   group: string
   icon: string | null
   description: string | null
+  output_config?: { field: string; fallback: string; fallback_label?: string }
   outputs: string[]
   fields: FieldPayload[]
   default_config: GraphConfig

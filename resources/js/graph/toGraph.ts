@@ -1,4 +1,5 @@
-import type { CanvasEdge, CanvasNode, Graph, GraphComponentPayload } from './types'
+import { resolveOutputs } from './outputs'
+import type { GraphConfig, CanvasEdge, CanvasNode, Graph, GraphComponentPayload } from './types'
 import { cloneGraphConfig } from './json'
 
 /** The palette as a lookup. One place builds it, so one place decides what a missing type means. */
@@ -30,12 +31,13 @@ export function defsByType(palette: GraphComponentPayload[]): Record<string, Gra
 export function resolveOutput(
   sourceHandle: string | null | undefined,
   def: GraphComponentPayload | undefined,
+  config?: GraphConfig | null,
 ): string | null {
   if (sourceHandle !== null && sourceHandle !== undefined && sourceHandle !== '') {
     return sourceHandle
   }
 
-  const outputs = def?.outputs ?? []
+  const outputs = resolveOutputs(def, config).map((output) => output.id)
 
   return outputs.length === 1 ? outputs[0]! : null
 }
@@ -54,6 +56,7 @@ export function toGraph(
   defs: Record<string, GraphComponentPayload>,
 ): { graph: Graph; unresolved: CanvasEdge[] } {
   const typeOf = new Map(canvas.nodes.map((node) => [node.id, node.data.type]))
+  const configOf = new Map(canvas.nodes.map((node) => [node.id, node.data.config]))
   const unresolved: CanvasEdge[] = []
 
   const edges = canvas.edges.map((edge) => {
@@ -61,9 +64,9 @@ export function toGraph(
     const definition = sourceType !== undefined && Object.prototype.hasOwnProperty.call(defs, sourceType)
       ? defs[sourceType]
       : undefined
-    const output = resolveOutput(edge.sourceHandle, definition)
+    const output = resolveOutput(edge.sourceHandle, definition, configOf.get(edge.source))
 
-    if (output === null) {
+    if (output === null || (definition?.kind === 'executable' && definition.output_config !== undefined && !resolveOutputs(definition, configOf.get(edge.source)).some((candidate) => candidate.id === output))) {
       unresolved.push(edge)
     }
 

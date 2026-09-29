@@ -1,5 +1,6 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { useContext } from 'react'
+import { resolveOutputs } from '../graph/outputs'
+import { useUpdateNodeInternals, Handle, Position, type NodeProps } from '@xyflow/react'
+import { useContext, useEffect } from 'react'
 import { NodeflowIcon } from '../presentation/icons'
 import { categoryClasses, categoryPresentation, nodeSummary } from '../presentation/node'
 import { CanvasContext, type NodeRenderer, type NodeRendererMap } from './context'
@@ -35,7 +36,10 @@ const badgeClass = 'shrink-0 rounded px-1.5 py-px text-[10px] font-semibold uppe
 export function NodeCard({ id, data, selected, isConnectable }: NodeProps<NodeflowNode>) {
     const { defs, renderers, nodeErrors, decorations } = useContext(CanvasContext)
     const def = Object.prototype.hasOwnProperty.call(defs, data.type) ? defs[data.type] : undefined
-    const outputs = def?.outputs ?? []
+    const outputs = resolveOutputs(def, data.config)
+    const updateNodeInternals = useUpdateNodeInternals()
+    const outputSignature = JSON.stringify(outputs)
+    useEffect(() => { updateNodeInternals(id) }, [id, outputSignature, updateNodeInternals])
     const Body = rendererFor(data.type, renderers)
     const errors = Object.prototype.hasOwnProperty.call(nodeErrors, id) ? nodeErrors[id]! : []
     const decoration = Object.prototype.hasOwnProperty.call(decorations, id) ? decorations[id]! : undefined
@@ -86,14 +90,14 @@ export function NodeCard({ id, data, selected, isConnectable }: NodeProps<Nodefl
             {outputs.length > 0 && (
                 <div aria-label="Outputs" className="border-t border-border py-0.5">
                     {outputs.map((output) => (
-                        <div key={output} data-output-row className="relative flex h-7 items-center justify-end px-3 pr-4 text-[11px] font-medium text-muted-foreground">
-                            <span className="truncate">{output}</span>
+                        <div key={output.id} data-output-row className="relative flex h-7 items-center justify-end px-3 pr-4 text-[11px] font-medium text-muted-foreground">
+                            <span className="truncate">{output.label}</span>
                             <Handle
-                                id={output}
+                                id={output.id}
                                 type="source"
                                 position={Position.Right}
                                 isConnectable={isConnectable}
-                                aria-label={`Output ${output}`}
+                                aria-label={`Output ${output.label}`}
                                 style={{ top: '50%', transform: 'translate(50%, -50%)' }}
                                 className="!size-3 !border-2 !border-card !bg-primary"
                             />

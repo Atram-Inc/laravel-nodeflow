@@ -1,4 +1,5 @@
-import type { GraphComponentPayload } from '../graph/types'
+import { resolveOutputs } from '../graph/outputs'
+import type { GraphConfig, GraphComponentPayload } from '../graph/types'
 
 export function nextNodeId(type: string, taken: Set<string>): string {
     // IDs appear in publish errors; duplicates collapse nodes with last-one-wins behavior.
@@ -17,12 +18,13 @@ export function canConnect(
     sourceType: string | undefined,
     sourceHandle: string | null,
     defs: Record<string, GraphComponentPayload>,
+    config?: GraphConfig | null,
 ): boolean {
     const definition = sourceType !== undefined
         && Object.prototype.hasOwnProperty.call(defs, sourceType)
         ? defs[sourceType]
         : undefined
-    const outputs = definition?.outputs
+    const outputs = resolveOutputs(definition, config).map((output) => output.id)
 
     // Unknown types refuse safely, as does any canvas gesture that toGraph cannot resolve.
     if (outputs === undefined || outputs.length === 0) {

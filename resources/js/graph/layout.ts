@@ -1,3 +1,4 @@
+import { resolveOutputs } from './outputs'
 import {
   CANVAS_ORIGIN,
   COMPONENT_GAP,
@@ -612,13 +613,13 @@ export function hierarchicalLayout(
   return layoutGraph(nodeIds.map((id) => ({ id })), edges, startId).positions
 }
 
-function outputCount(type: string, definitions: Record<string, GraphComponentPayload>): number {
-  return Object.prototype.hasOwnProperty.call(definitions, type) ? definitions[type]!.outputs?.length ?? 0 : 0
+function outputCount(node: NonNullable<Graph["nodes"]>[number], definitions: Record<string, GraphComponentPayload>): number {
+  return resolveOutputs(definitions[node.type], node.config).length
 }
 
-function outputOrder(type: string | undefined, output: string | null | undefined, definitions: Record<string, GraphComponentPayload>): number {
-  if (type === undefined || output === null || output === undefined || !Object.prototype.hasOwnProperty.call(definitions, type)) return 0
-  const index = (definitions[type]!.outputs as readonly string[] | undefined)?.indexOf(output) ?? -1
+function outputOrder(node: NonNullable<Graph["nodes"]>[number] | undefined, output: string | null | undefined, definitions: Record<string, GraphComponentPayload>): number {
+  if (node === undefined || output === null || output === undefined) return 0
+  const index = resolveOutputs(definitions[node.type], node.config).findIndex((candidate) => candidate.id === output)
   return index < 0 ? 0 : index
 }
 
@@ -632,14 +633,14 @@ export function layoutForGraph(
   measured?: (id: string) => number | undefined,
 ): LayoutResult {
   const nodes = graph.nodes ?? []
-  const typeById = new Map<string, string>()
+  const typeById = new Map<string, NonNullable<Graph["nodes"]>[number]>()
   for (const node of nodes) {
-    if (!typeById.has(node.id)) typeById.set(node.id, node.type)
+    if (!typeById.has(node.id)) typeById.set(node.id, node)
   }
   return layoutGraph(
     nodes.map((node) => ({
       id: node.id,
-      height: Math.max(estimatedNodeHeight(outputCount(node.type, definitions)), measured?.(node.id) ?? 0),
+      height: Math.max(estimatedNodeHeight(outputCount(node, definitions)), measured?.(node.id) ?? 0),
     })),
     (graph.edges ?? []).map((edge) => ({ from: edge.from, to: edge.to, order: outputOrder(typeById.get(edge.from), edge.output, definitions) })),
     graph.start !== null && graph.start !== undefined && graph.start !== '' ? graph.start : nodes[0]?.id ?? '',

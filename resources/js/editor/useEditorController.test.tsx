@@ -1523,3 +1523,36 @@ describe('panel defaults across the drawer breakpoint', () => {
         expect(result.current.view).toMatchObject({ libraryOpen: true, inspectorOpen: true })
     })
 })
+
+it('edits dynamic output labels and deletes branches without rerouting edges, with undo', () => {
+    const dynamic: NodeTypePayload = { ...send, output_config: { field: 'branches', fallback: 'otherwise' } }
+    const view = controller({ palette: [dynamic, exit], graph: {
+        start: 'send1', nodes: [
+            { id: 'send1', type: send.type, config: { branches: [{ id: 'a', label: 'Original' }] } },
+            { id: 'exit1', type: exit.type, config: {} },
+        ], edges: [{ from: 'send1', to: 'exit1', output: 'a' }],
+    } })
+    const edgeId = view.result.current.document.edges[0]!.id
+    act(() => view.result.current.actions.configure('send1', 'branches', [{ id: 'a', label: 'Renamed' }]))
+    expect(view.result.current.document.edges[0]).toMatchObject({ id: edgeId, sourceHandle: 'a', label: 'Renamed' })
+    act(() => view.result.current.actions.configure('send1', 'branches', []))
+    expect(view.result.current.document.edges[0]).toMatchObject({ id: edgeId, sourceHandle: 'a' })
+    act(() => view.result.current.actions.undo())
+    expect(view.result.current.document.nodes[0]!.data.config.branches).toEqual([{ id: 'a', label: 'Original' }])
+    view.unmount()
+})
+
+it('lays out downstream branches in their configured order after reorder', () => {
+    const dynamic: NodeTypePayload = { ...send, outputs: ['otherwise'], output_config: { field: 'branches', fallback: 'otherwise' } }
+    const view = controller({ palette: [dynamic, exit], graph: {
+        start: 'send1', nodes: [
+            { id: 'send1', type: send.type, config: { branches: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } },
+            { id: 'exit1', type: exit.type, config: {} },
+            { id: 'exit2', type: exit.type, config: {} },
+        ], edges: [{ from: 'send1', to: 'exit1', output: 'a' }, { from: 'send1', to: 'exit2', output: 'b' }],
+    } })
+    act(() => view.result.current.actions.configure('send1', 'branches', [{ id: 'b', label: 'B' }, { id: 'a', label: 'A' }]))
+    const nodes = view.result.current.document.nodes
+    expect(nodes.find((node) => node.id === 'exit2')!.position.y).toBeLessThan(nodes.find((node) => node.id === 'exit1')!.position.y)
+    view.unmount()
+})

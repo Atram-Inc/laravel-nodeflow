@@ -42,8 +42,8 @@ abstract class Node
     /** @return array<string, array<string>> field key => messages */
     public function validate(array $config): array
     {
-        return Validator::make($config, $this->definition()->rules())
+        return array_merge_recursive($this->definition()->validateOutputs($config), Validator::make($config, $this->definition()->rules())
             ->errors()
-            ->toArray();
+            ->toArray());
     }
 }

@@ -27,8 +27,7 @@ class GraphValidator
     public function validate(
         Graph $graph,
         ?TriggerDefinitionContext $definitions = null,
-    ): GraphValidationResult
-    {
+    ): GraphValidationResult {
         $definitions ??= new TriggerDefinitionContext;
         $errors = [];
         $warnings = [];
@@ -106,7 +105,7 @@ class GraphValidator
                 $nodeErrors[] = ['node' => $id, 'field' => null, 'message' => end($errors)];
             }
 
-            foreach ($instance->validate($node['config'] ?? []) as $field => $messages) {
+            foreach ($this->mergeFieldErrors($instance->validate($node['config'] ?? []), $instance->definition()->validateOutputs($node['config'] ?? [])) as $field => $messages) {
                 $errors[] = "Node [{$id}] field [{$field}]: ".implode(' ', $messages);
                 // The bare field message, not the prefixed string: the editor already
                 // knows the node and field from the structure, so re-prefixing here
@@ -130,7 +129,7 @@ class GraphValidator
                 $family = $this->types->family($fromType);
                 $outputs = match ($family) {
                     'executable' => $this->registry->has($fromType)
-                        ? $this->registry->resolve($fromType)->definition()->outputNames()
+                        ? $this->registry->resolve($fromType)->definition()->outputNames($from['config'] ?? [])
                         : null,
                     'trigger' => $this->triggers->has($fromType) ? ['started'] : null,
                     default => null,
@@ -204,8 +203,7 @@ class GraphValidator
         TriggerDefinitionContext $definitions,
         array &$errors,
         array &$nodeErrors,
-    ): void
-    {
+    ): void {
         $trigger = $this->triggers->resolve($node['type']);
         $config = $node['config'] ?? [];
         $fieldErrors = [];
