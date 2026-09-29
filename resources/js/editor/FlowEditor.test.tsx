@@ -1635,3 +1635,36 @@ it('provides the live graph to host data guidance and keeps inserted values in t
         graph: expect.objectContaining({ nodes: expect.arrayContaining([expect.objectContaining({ id: 'send1', config: { template: '{{ name }}' } })]) }),
     }))
 })
+
+it('offers a translated connection delete action, saves only the removed line, and supports undo', async () => {
+    const user = userEvent.setup()
+    renderEditor({ labels: { deleteConnection: 'Eliminar conexión' } })
+    expect(screen.queryByRole('button', { name: 'Eliminar conexión' })).toBeNull()
+    const edge = canvasProbe.current!.edges[0]!
+    act(() => canvasProbe.current!.onEdgeClick!(edge.id))
+    await user.click(screen.getByRole('button', { name: 'Eliminar conexión' }))
+    expect(canvasProbe.current!.edges).toHaveLength(0)
+    expect(canvasProbe.current!.nodes).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'Eliminar conexión' })).toBeNull()
+    await waitFor(() => expect(requestBody(vi.mocked(fetch), urls.draft).graph).toMatchObject({ edges: [] }))
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(canvasProbe.current!.edges).toHaveLength(1)
+    expect(canvasProbe.current!.edges[0]!.sourceHandle).toBe('sent')
+})
+
+it('does not offer connection deletion in read-only mode', () => {
+    renderEditor({ readOnly: true })
+    expect(canvasProbe.current!.onEdgeClick).toBeUndefined()
+    expect(screen.queryByRole('button', { name: 'Delete connection' })).toBeNull()
+})
+
+it('clears the connection action when adding a node after selecting a line', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    act(() => canvasProbe.current!.onEdgeClick!(canvasProbe.current!.edges[0]!.id))
+    expect(screen.getByRole('button', { name: 'Delete connection' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add Send message' }))
+    expect(canvasProbe.current!.nodes).toHaveLength(3)
+    expect(canvasProbe.current!.edges).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Delete connection' })).toBeNull()
+})

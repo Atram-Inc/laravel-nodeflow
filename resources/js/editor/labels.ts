@@ -11,6 +11,7 @@ export type EditorLabels = {
     viewOnly: string
     notPublished: string
     unpublishedChanges: string
+    deleteConnection: string
     dismiss: string
     /** The toast after a successful publish. */
     publishedToast: (version: number) => string
@@ -31,6 +32,7 @@ export const defaultEditorLabels: EditorLabels = {
     viewOnly: 'View only',
     notPublished: 'Not published',
     unpublishedChanges: 'Unpublished changes',
+    deleteConnection: 'Delete connection',
     dismiss: 'Dismiss',
     publishedToast: (version) => `Published v${version}`,
     publishFailed: 'Could not publish',
