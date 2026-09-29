@@ -142,7 +142,7 @@ class NodeflowServiceProvider extends ServiceProvider
 
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
-        Nodeflow::register(config('nodeflow.core_nodes', []));
+        Nodeflow::register(config('nodeflow.core_nodes', (require __DIR__.'/../config/nodeflow.php')['core_nodes']));
 
         // Host providers register custom components in their boot() methods.
         // Resolve health only after every provider has booted, regardless of

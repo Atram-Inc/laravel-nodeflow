@@ -53,7 +53,7 @@ final class NodeflowServiceProvider extends ServiceProvider
 }
 ```
 
-The package provider unconditionally registers its core executable nodes plus the `webhook`, `model`, and `event` drivers and built-in trigger nodes. The host arrays contain extensions and allowlisted sources only. A source must be registered after its driver because registration calls `TriggerDriver::sourceRegistered()` to attach any deduplicated listener.
+The package provider registers the executable classes listed in `nodeflow.core_nodes`, defaulting to Exit, Fact Condition, Wait, Condition and Start Flow. A host may replace that list, including with an empty array. Removing a type makes versions and live runs that reference it unresolvable unless it is registered separately; complete or migrate those runs before removing it. Older configuration caches without the setting keep the package defaults. The `webhook`, `model`, and `event` drivers and built-in trigger nodes are registered independently. The host arrays contain extensions and allowlisted sources only. A source must be registered after its driver because registration calls `TriggerDriver::sourceRegistered()` to attach any deduplicated listener.
 
 ## Public registration facade
 
