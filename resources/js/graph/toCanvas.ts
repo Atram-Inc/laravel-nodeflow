@@ -1,3 +1,4 @@
+import { resolveOutputs } from './outputs'
 import { CANVAS_ORIGIN } from '../canvas/layout'
 import { layoutForGraph } from './layout'
 import { cloneGraphConfig } from './json'
@@ -31,6 +32,8 @@ export function toCanvas(
 
   const edges = (graph.edges ?? []).map((edge, index): CanvasEdge => {
     const lanes = layout.lanes[index]
+    const source = nodes.find((node) => node.id === edge.from)
+    const outputs = resolveOutputs(source ? definitions[source.data.type] : undefined, source?.data.config)
     return {
       // The index makes even parallel, otherwise-identical draft edges collision-safe.
       id: `nf${index}-${edge.from}-${edge.output ?? ''}-${edge.to}`,
@@ -38,7 +41,7 @@ export function toCanvas(
       source: edge.from,
       sourceHandle: edge.output ?? null,
       target: edge.to,
-      label: edge.output ?? undefined,
+      label: outputs.find((output) => output.id === edge.output)?.label ?? edge.output ?? undefined,
       ...(lanes === undefined ? {} : { data: { lanes } }),
     }
   })

@@ -845,3 +845,24 @@ describe('Canvas', () => {
     })
 
 })
+
+it('renders configured labels on stable handles and updates removed branches', () => {
+    const definition = def({ output_config: { field: 'branches', fallback: 'otherwise', fallback_label: 'Everyone else' } })
+    const card = (branches: { id: string; label: string }[]) => (
+        <ReactFlowProvider>
+            <CanvasContext.Provider value={{ defs: { 'app.send': definition }, renderers: {}, nodeErrors: {}, decorations: {} }}>
+                <NodeCard {...nodeProps} data={{ ...data, config: { branches } }} />
+            </CanvasContext.Provider>
+        </ReactFlowProvider>
+    )
+    const view = render(card([{ id: 'a', label: 'Subscribed' }]))
+    expect(view.container.querySelector('[data-handleid="a"]')).not.toBeNull()
+    expect(screen.getByLabelText('Output Subscribed')).toBeInTheDocument()
+    expect(screen.getByLabelText('Output Everyone else')).toBeInTheDocument()
+    view.rerender(card([{ id: 'a', label: 'New name' }]))
+    expect(view.container.querySelector('[data-handleid="a"]')).not.toBeNull()
+    expect(screen.getByLabelText('Output New name')).toBeInTheDocument()
+    view.rerender(card([]))
+    expect(view.container.querySelector('[data-handleid="a"]')).toBeNull()
+    expect(view.container.querySelector('[data-handleid="otherwise"]')).not.toBeNull()
+})

@@ -14,6 +14,10 @@ use Nodeflow\Models\FlowVersion;
 use Nodeflow\Models\Run;
 use Nodeflow\Models\RunSubject;
 use Nodeflow\Nodeflow;
+use Nodeflow\Schema\NodeDefinition;
+use Nodeflow\Schema\SubjectAttribute;
+use Nodeflow\Schema\SubjectAttributeRegistry;
+use Tests\Support\FakeEmptyAudienceNode;
 use Tests\Support\FakeSelfExitingNode;
 use Tests\Support\FakeSendNode;
 use Tests\Support\FakeThrowingAudienceNode;
@@ -80,12 +84,21 @@ class RetainingUniformAudienceMemoryControl extends UniformAudienceMemoryProbe
 }
 
 beforeEach(function () {
-    app()->bind(TenantResolver::class, fn () => new class implements TenantResolver {
-        public function currentTenantId(): ?string { return 'org-1'; }
-        public function ownsSubject(string $t, string $ty, string $i): bool { return true; }
+    app()->bind(TenantResolver::class, fn () => new class implements TenantResolver
+    {
+        public function currentTenantId(): ?string
+        {
+            return 'org-1';
+        }
+
+        public function ownsSubject(string $t, string $ty, string $i): bool
+        {
+            return true;
+        }
     });
 
-    app()->bind(SubjectResolver::class, fn () => new class implements SubjectResolver {
+    app()->bind(SubjectResolver::class, fn () => new class implements SubjectResolver
+    {
         public function resolve(string $subjectType, array $subjectIds): array
         {
             return collect($subjectIds)
@@ -118,8 +131,8 @@ beforeEach(function () {
         RunSubject::create(['run_id' => $this->run->id, 'subject_type' => 'user', 'subject_id' => $id, 'current_node_id' => 'n1', 'status' => 'active']);
     }
 
-    app(\Nodeflow\Schema\SubjectAttributeRegistry::class)->register(
-        \Nodeflow\Schema\SubjectAttribute::make('clicked', 'Clicked', 'boolean', fn ($s) => $s['clicked']),
+    app(SubjectAttributeRegistry::class)->register(
+        SubjectAttribute::make('clicked', 'Clicked', 'boolean', fn ($s) => $s['clicked']),
     );
 });
 
@@ -267,7 +280,7 @@ it('reconciles only the subjects that were at this node, never the rest of the r
 it('completes the subjects of a start_flow node that exits this flow', function () {
     // Fix 2's headline case: canonical step 4 hands the cohort to a sub-flow and
     // the default exit_this_flow => true returns NodeResult::empty().
-    Nodeflow::register([\Tests\Support\FakeEmptyAudienceNode::class]);
+    Nodeflow::register([FakeEmptyAudienceNode::class]);
 
     $graph = Graph::fromArray([
         'start' => 'n1',
@@ -763,4 +776,29 @@ it('returns no work when a uniform audience is cancelled after high-water captur
         ->and($runnerUpdates)->toBe([])
         ->and(RunSubject::where('run_id', $this->run->id)->where('status', 'exited')->count())->toBe(3)
         ->and(RunSubject::where('run_id', $this->run->id)->where('current_node_id', 'n1')->count())->toBe(3);
+});
+
+it('accepts configured outputs for uniform audience execution', function () {
+    $node = new class extends FakeUniformAudienceNode
+    {
+        public static function type(): string
+        {
+            return 'test.configured-uniform';
+        }
+
+        public function definition(): NodeDefinition
+        {
+            return NodeDefinition::make('Configured')->outputsFromConfig('branches');
+        }
+    };
+    Nodeflow::register([$node::class]);
+    $graph = Graph::fromArray([
+        'start' => 'n1',
+        'nodes' => [
+            ['id' => 'n1', 'type' => $node::type(), 'config' => ['branches' => [['id' => 'sent', 'label' => 'Sent']]]],
+            ['id' => 'n2', 'type' => 'core.exit', 'config' => []],
+        ],
+        'edges' => [['from' => 'n1', 'output' => 'sent', 'to' => 'n2']],
+    ]);
+    expect(app(NodeRunner::class)->run($this->run, $graph, 'n1'))->toBe(['n2']);
 });

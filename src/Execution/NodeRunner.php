@@ -47,7 +47,7 @@ class NodeRunner
                 $definition['type'],
                 $config,
                 $node,
-                $node->definition()->outputNames(),
+                $node->definition()->outputNames($config),
                 $startedAt,
             );
         }

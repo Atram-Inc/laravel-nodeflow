@@ -1,3 +1,4 @@
+import { resolveOutputs } from '../graph/outputs'
 import {
     addEdge,
     applyEdgeChanges,
@@ -215,7 +216,7 @@ export function laidOutDocument(
 ): EditorDocument {
     const layout = layoutForGraph({
         start: document.startId,
-        nodes: document.nodes.map((node) => ({ id: node.id, type: node.data.type })),
+        nodes: document.nodes.map((node) => ({ id: node.id, type: node.data.type, config: node.data.config })),
         edges: document.edges.map((edge) => ({ from: edge.source, to: edge.target, output: edge.sourceHandle })),
     }, defs, (id) => measured?.get(id)?.height)
     const nodes = document.nodes.map((node) => {
@@ -594,8 +595,8 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
 
     /** The height the last layout kept for a node: its estimate, or what was measured then. */
     const reservedHeight = useCallback((id: string) => {
-        const type = documentRef.current.nodes.find((node) => node.id === id)?.data.type
-        const outputs = type !== undefined && Object.prototype.hasOwnProperty.call(defs, type) ? defs[type]!.outputs?.length ?? 0 : 0
+        const node = documentRef.current.nodes.find((node) => node.id === id)
+        const outputs = resolveOutputs(node ? defs[node.data.type] : undefined, node?.data.config).length
         return Math.max(estimatedNodeHeight(outputs), reservedRef.current.get(id)?.height ?? 0)
     }, [defs])
 
@@ -816,10 +817,10 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         const targetKind = target === undefined ? undefined : defs[target.data.type]?.kind
         if (source === undefined || target === undefined || targetKind === 'trigger') return
         if (sourceKind === 'trigger' && (connection.sourceHandle !== 'started' || targetKind !== 'executable')) return
-        if (!canConnect(source.data.type, connection.sourceHandle, defs)) return
+        if (!canConnect(source.data.type, connection.sourceHandle, defs, source.data.config)) return
         if (current.edges.some((edge) => edge.source === connection.source && edge.sourceHandle === connection.sourceHandle)) return
         if (wouldCreateCycle(current.edges, connection.source, connection.target)) return
-        commitLaidOut({ ...current, edges: addEdge<NodeflowEdge>({ ...connection, label: connection.sourceHandle }, current.edges) })
+        commitLaidOut({ ...current, edges: addEdge<NodeflowEdge>({ ...connection, label: resolveOutputs(defs[source.data.type], source.data.config).find((output) => output.id === connection.sourceHandle)?.label ?? connection.sourceHandle }, current.edges) })
     }, [commitLaidOut, defs])
 
     const configure = useCallback((id: string, key: string, value: unknown) => {
@@ -831,8 +832,14 @@ export function useEditorController(options: UseEditorControllerOptions): UseEdi
         } catch {
             return
         }
-        commit({ ...current, nodes: current.nodes.map((node) => node.id === id ? { ...node, data: { ...node.data, config: { ...node.data.config, [key]: copiedValue } } } : node) }, `config:${id}:${key}`)
-    }, [commit])
+        const nodes = current.nodes.map((node) => node.id === id ? { ...node, data: { ...node.data, config: { ...node.data.config, [key]: copiedValue } } } : node)
+        const source = nodes.find((node) => node.id === id)!
+        const outputs = resolveOutputs(defs[source.data.type], source.data.config)
+        const edges = current.edges.map((edge) => edge.source === id ? { ...edge, label: outputs.find((output) => output.id === edge.sourceHandle)?.label ?? edge.sourceHandle ?? undefined } : edge)
+        const definition = defs[source.data.type]
+        const commitConfig = definition?.kind === 'executable' && definition.output_config?.field === key ? commitLaidOut : commit
+        commitConfig({ ...current, nodes, edges }, `config:${id}:${key}`)
+    }, [commit, commitLaidOut, defs])
 
     const configureTriggerSource = useCallback((id: string, source: string | null) => {
         const current = documentRef.current
